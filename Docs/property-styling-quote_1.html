@@ -1,0 +1,787 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Property Styling Quote</title>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;1,300;1,400&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --cream: #FAF8F4;
+    --warm-white: #FFFFFF;
+    --stone: #E8E3DA;
+    --taupe: #B5AA98;
+    --charcoal: #2C2825;
+    --mid: #6B6259;
+    --accent: #8B7355;
+    --accent-light: #F0EAE0;
+    --success: #3B6D11;
+    --success-bg: #EAF3DE;
+    --danger: #A32D2D;
+    --danger-bg: #FCEBEB;
+    --border: rgba(44,40,37,0.12);
+    --border-med: rgba(44,40,37,0.2);
+  }
+
+  body {
+    font-family: 'DM Sans', sans-serif;
+    background: var(--cream);
+    color: var(--charcoal);
+    min-height: 100vh;
+    padding: 0 0 80px;
+  }
+
+  /* Header */
+  .header {
+    background: var(--charcoal);
+    padding: 48px 40px 40px;
+    text-align: center;
+  }
+  .header-eyebrow {
+    font-family: 'DM Sans', sans-serif;
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: var(--taupe);
+    margin-bottom: 12px;
+  }
+  .header h1 {
+    font-family: 'Cormorant Garamond', serif;
+    font-size: 42px;
+    font-weight: 300;
+    color: #FAF8F4;
+    letter-spacing: 0.02em;
+    line-height: 1.2;
+  }
+  .header h1 em {
+    font-style: italic;
+    font-weight: 300;
+  }
+  .header-meta {
+    margin-top: 24px;
+    display: flex;
+    justify-content: center;
+    gap: 40px;
+    flex-wrap: wrap;
+  }
+  .header-meta-item {
+    text-align: center;
+  }
+  .header-meta-label {
+    font-size: 11px;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    color: var(--taupe);
+    margin-bottom: 4px;
+  }
+  .header-meta-value {
+    font-size: 14px;
+    color: #FAF8F4;
+    font-weight: 300;
+  }
+
+  /* Status badge */
+  .status-bar {
+    background: var(--accent-light);
+    border-bottom: 1px solid var(--stone);
+    padding: 12px 40px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .status-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    font-weight: 500;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--accent);
+  }
+  .status-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--accent);
+    animation: pulse 2s ease-in-out infinite;
+  }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+  .status-expires {
+    font-size: 12px;
+    color: var(--mid);
+  }
+
+  /* Main layout */
+  .container {
+    max-width: 860px;
+    margin: 0 auto;
+    padding: 0 24px;
+  }
+
+  /* Section */
+  .section {
+    margin-top: 40px;
+  }
+  .section-label {
+    font-size: 11px;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: var(--taupe);
+    margin-bottom: 16px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--stone);
+  }
+
+  /* Property card */
+  .property-card {
+    background: var(--warm-white);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 24px;
+    display: flex;
+    gap: 20px;
+    align-items: flex-start;
+  }
+  .property-icon {
+    width: 48px;
+    height: 48px;
+    border-radius: 8px;
+    background: var(--charcoal);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+  .property-icon svg { width: 22px; height: 22px; fill: none; stroke: #FAF8F4; stroke-width: 1.5; }
+  .property-details h3 {
+    font-family: 'Cormorant Garamond', serif;
+    font-size: 22px;
+    font-weight: 400;
+    margin-bottom: 4px;
+  }
+  .property-details p { font-size: 14px; color: var(--mid); line-height: 1.6; }
+  .property-tags {
+    display: flex;
+    gap: 8px;
+    margin-top: 12px;
+    flex-wrap: wrap;
+  }
+  .tag {
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    padding: 4px 10px;
+    background: var(--cream);
+    border: 1px solid var(--stone);
+    border-radius: 20px;
+    color: var(--mid);
+  }
+
+  /* Line items table */
+  .quote-table {
+    background: var(--warm-white);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    overflow: hidden;
+  }
+  .quote-table-header {
+    display: grid;
+    grid-template-columns: 1fr auto auto;
+    padding: 12px 24px;
+    background: var(--charcoal);
+    gap: 16px;
+  }
+  .quote-table-header span {
+    font-size: 11px;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    color: var(--taupe);
+    font-weight: 400;
+  }
+  .quote-table-header span:not(:first-child) { text-align: right; }
+
+  .line-item {
+    display: grid;
+    grid-template-columns: 1fr auto auto;
+    padding: 16px 24px;
+    gap: 16px;
+    border-bottom: 1px solid var(--border);
+    align-items: center;
+  }
+  .line-item:last-child { border-bottom: none; }
+  .line-item:hover { background: var(--cream); }
+  .item-name {
+    font-size: 15px;
+    font-weight: 400;
+    margin-bottom: 3px;
+  }
+  .item-desc { font-size: 13px; color: var(--mid); }
+  .item-qty {
+    font-size: 14px;
+    color: var(--mid);
+    text-align: right;
+    white-space: nowrap;
+  }
+  .item-price {
+    font-size: 15px;
+    font-weight: 500;
+    text-align: right;
+    white-space: nowrap;
+    min-width: 90px;
+  }
+
+  /* Totals */
+  .totals {
+    background: var(--warm-white);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    overflow: hidden;
+  }
+  .total-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 13px 24px;
+    border-bottom: 1px solid var(--border);
+    font-size: 14px;
+  }
+  .total-row:last-child { border-bottom: none; }
+  .total-row .label { color: var(--mid); }
+  .total-row.grand {
+    background: var(--charcoal);
+    padding: 18px 24px;
+  }
+  .total-row.grand .label {
+    font-family: 'Cormorant Garamond', serif;
+    font-size: 18px;
+    font-weight: 400;
+    letter-spacing: 0.04em;
+    color: var(--taupe);
+  }
+  .total-row.grand .amount {
+    font-family: 'Cormorant Garamond', serif;
+    font-size: 24px;
+    font-weight: 400;
+    color: #FAF8F4;
+  }
+
+  /* Terms */
+  .terms-box {
+    background: var(--warm-white);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 24px;
+  }
+  .terms-box h4 {
+    font-family: 'Cormorant Garamond', serif;
+    font-size: 18px;
+    font-weight: 400;
+    margin-bottom: 14px;
+  }
+  .terms-list {
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .terms-list li {
+    font-size: 13px;
+    color: var(--mid);
+    padding-left: 20px;
+    position: relative;
+    line-height: 1.6;
+  }
+  .terms-list li::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 8px;
+    width: 5px;
+    height: 1px;
+    background: var(--taupe);
+  }
+
+  /* Client form */
+  .form-card {
+    background: var(--warm-white);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 28px;
+  }
+  .form-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+  }
+  .form-group {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .form-group.full { grid-column: 1 / -1; }
+  .form-group label {
+    font-size: 11px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--mid);
+    font-weight: 500;
+  }
+  .form-group input, .form-group textarea {
+    font-family: 'DM Sans', sans-serif;
+    font-size: 14px;
+    color: var(--charcoal);
+    background: var(--cream);
+    border: 1px solid var(--stone);
+    border-radius: 8px;
+    padding: 11px 14px;
+    outline: none;
+    transition: border-color 0.15s;
+    resize: none;
+  }
+  .form-group input:focus, .form-group textarea:focus {
+    border-color: var(--accent);
+    background: #fff;
+  }
+  .form-group input::placeholder, .form-group textarea::placeholder {
+    color: var(--taupe);
+  }
+
+  /* Signature */
+  .sig-wrap {
+    margin-top: 16px;
+    border: 1px solid var(--stone);
+    border-radius: 8px;
+    overflow: hidden;
+    background: #fff;
+    position: relative;
+  }
+  .sig-label {
+    position: absolute;
+    bottom: 10px;
+    left: 14px;
+    font-size: 11px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--taupe);
+    pointer-events: none;
+  }
+  #sig-canvas {
+    display: block;
+    width: 100%;
+    height: 130px;
+    cursor: crosshair;
+    touch-action: none;
+  }
+  .sig-actions {
+    display: flex;
+    gap: 10px;
+    margin-top: 8px;
+    justify-content: flex-end;
+  }
+  .btn-clear {
+    font-family: 'DM Sans', sans-serif;
+    font-size: 12px;
+    color: var(--mid);
+    background: none;
+    border: 1px solid var(--stone);
+    border-radius: 6px;
+    padding: 6px 14px;
+    cursor: pointer;
+    letter-spacing: 0.04em;
+  }
+  .btn-clear:hover { border-color: var(--accent); color: var(--accent); }
+
+  /* Action buttons */
+  .action-section {
+    margin-top: 32px;
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+  .btn-approve {
+    flex: 1;
+    min-width: 200px;
+    font-family: 'DM Sans', sans-serif;
+    font-size: 14px;
+    font-weight: 500;
+    letter-spacing: 0.06em;
+    padding: 16px 24px;
+    background: var(--charcoal);
+    color: #FAF8F4;
+    border: none;
+    border-radius: 10px;
+    cursor: pointer;
+    transition: background 0.15s, transform 0.1s;
+  }
+  .btn-approve:hover { background: #1a1714; transform: translateY(-1px); }
+  .btn-approve:active { transform: translateY(0); }
+
+  .btn-decline {
+    flex: 1;
+    min-width: 160px;
+    font-family: 'DM Sans', sans-serif;
+    font-size: 14px;
+    font-weight: 400;
+    letter-spacing: 0.06em;
+    padding: 16px 24px;
+    background: transparent;
+    color: var(--mid);
+    border: 1px solid var(--stone);
+    border-radius: 10px;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .btn-decline:hover { border-color: var(--danger); color: var(--danger); background: var(--danger-bg); }
+
+  /* Confirmation states */
+  .confirmation {
+    display: none;
+    text-align: center;
+    padding: 48px 32px;
+    background: var(--warm-white);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    margin-top: 32px;
+  }
+  .confirmation.approved { border-color: #3B6D11; background: var(--success-bg); }
+  .confirmation.declined { border-color: var(--danger); background: var(--danger-bg); }
+  .confirmation-icon {
+    width: 52px;
+    height: 52px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin: 0 auto 20px;
+    font-size: 22px;
+  }
+  .confirmation.approved .confirmation-icon { background: rgba(59,109,17,0.12); }
+  .confirmation.declined .confirmation-icon { background: rgba(163,45,45,0.1); }
+  .confirmation h3 {
+    font-family: 'Cormorant Garamond', serif;
+    font-size: 26px;
+    font-weight: 400;
+    margin-bottom: 8px;
+  }
+  .confirmation.approved h3 { color: var(--success); }
+  .confirmation.declined h3 { color: var(--danger); }
+  .confirmation p { font-size: 14px; color: var(--mid); max-width: 400px; margin: 0 auto; line-height: 1.7; }
+
+  /* Footer */
+  .footer {
+    margin-top: 48px;
+    text-align: center;
+    padding: 24px;
+    border-top: 1px solid var(--stone);
+  }
+  .footer p { font-size: 12px; color: var(--taupe); }
+
+  @media (max-width: 600px) {
+    .header { padding: 36px 24px 32px; }
+    .header h1 { font-size: 32px; }
+    .header-meta { gap: 24px; }
+    .form-grid { grid-template-columns: 1fr; }
+    .form-group.full { grid-column: 1; }
+    .quote-table-header { grid-template-columns: 1fr auto; }
+    .quote-table-header span:nth-child(2) { display: none; }
+    .line-item { grid-template-columns: 1fr auto; }
+    .item-qty { display: none; }
+    .status-bar { padding: 12px 20px; }
+  }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <p class="header-eyebrow">Property Styling Proposal</p>
+  <h1>Your <em>Styling</em> Quote</h1>
+  <div class="header-meta">
+    <div class="header-meta-item">
+      <p class="header-meta-label">Quote No.</p>
+      <p class="header-meta-value">PSQ-2026-0042</p>
+    </div>
+    <div class="header-meta-item">
+      <p class="header-meta-label">Prepared by</p>
+      <p class="header-meta-value">Your Styling Co.</p>
+    </div>
+    <div class="header-meta-item">
+      <p class="header-meta-label">Issue Date</p>
+      <p class="header-meta-value">18 March 2026</p>
+    </div>
+    <div class="header-meta-item">
+      <p class="header-meta-label">Prepared for</p>
+      <p class="header-meta-value">The Johnson Family</p>
+    </div>
+  </div>
+</div>
+
+<div class="status-bar">
+  <span class="status-badge"><span class="status-dot"></span>Awaiting approval</span>
+  <span class="status-expires">Quote valid until: 1 April 2026</span>
+</div>
+
+<div class="container">
+
+  <!-- Property Details -->
+  <div class="section">
+    <p class="section-label">Property</p>
+    <div class="property-card">
+      <div class="property-icon">
+        <svg viewBox="0 0 24 24"><path d="M3 9.5L12 3l9 6.5V20a1 1 0 01-1 1H4a1 1 0 01-1-1V9.5z"/><path d="M9 21V12h6v9"/></svg>
+      </div>
+      <div class="property-details">
+        <h3>14 Riverside Crescent, Toorak VIC 3142</h3>
+        <p>4 bedroom · 2 bathroom · Double garage · Approx. 320m²<br>Vacant property — full styling package for sale campaign</p>
+        <div class="property-tags">
+          <span class="tag">Full Styling</span>
+          <span class="tag">Vacant</span>
+          <span class="tag">6-Week Hire</span>
+          <span class="tag">Melbourne</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Line Items -->
+  <div class="section">
+    <p class="section-label">Services &amp; Items</p>
+    <div class="quote-table">
+      <div class="quote-table-header">
+        <span>Description</span>
+        <span>Period / Qty</span>
+        <span>Amount</span>
+      </div>
+
+      <div class="line-item">
+        <div>
+          <p class="item-name">Furniture Hire — Living &amp; Dining</p>
+          <p class="item-desc">Premium furniture package including sofa, coffee table, dining set, rug &amp; soft furnishings</p>
+        </div>
+        <div class="item-qty">6 weeks</div>
+        <div class="item-price">$2,400</div>
+      </div>
+
+      <div class="line-item">
+        <div>
+          <p class="item-name">Furniture Hire — Master Bedroom</p>
+          <p class="item-desc">Bed frame, bedside tables, lamps, linen package &amp; artwork</p>
+        </div>
+        <div class="item-qty">6 weeks</div>
+        <div class="item-price">$1,100</div>
+      </div>
+
+      <div class="line-item">
+        <div>
+          <p class="item-name">Furniture Hire — Bedrooms 2 &amp; 3</p>
+          <p class="item-desc">Bed frames, linen, cushions &amp; styling accessories</p>
+        </div>
+        <div class="item-qty">6 weeks</div>
+        <div class="item-price">$960</div>
+      </div>
+
+      <div class="line-item">
+        <div>
+          <p class="item-name">Styling &amp; Installation</p>
+          <p class="item-desc">Full day styling consultation, delivery, installation &amp; styling throughout</p>
+        </div>
+        <div class="item-qty">1 day</div>
+        <div class="item-price">$950</div>
+      </div>
+
+      <div class="line-item">
+        <div>
+          <p class="item-name">Artwork &amp; Accessories Package</p>
+          <p class="item-desc">Curated artwork, mirrors, vases, cushions, throws &amp; decorative objects</p>
+        </div>
+        <div class="item-qty">Included</div>
+        <div class="item-price">$680</div>
+      </div>
+
+      <div class="line-item">
+        <div>
+          <p class="item-name">Delivery &amp; Collection</p>
+          <p class="item-desc">Melbourne metro return delivery, including packing, transport &amp; removal</p>
+        </div>
+        <div class="item-qty">Return</div>
+        <div class="item-price">$380</div>
+      </div>
+
+      <div class="line-item">
+        <div>
+          <p class="item-name">Extension — Additional Week (optional)</p>
+          <p class="item-desc">Weekly rate if the campaign extends beyond 6 weeks</p>
+        </div>
+        <div class="item-qty">Per week</div>
+        <div class="item-price" style="color: var(--taupe);">$320 / wk</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Totals -->
+  <div class="section">
+    <p class="section-label">Summary</p>
+    <div class="totals">
+      <div class="total-row">
+        <span class="label">Subtotal</span>
+        <span>$6,470.00</span>
+      </div>
+      <div class="total-row">
+        <span class="label">GST (10%)</span>
+        <span>$647.00</span>
+      </div>
+      <div class="total-row grand">
+        <span class="label">Total (inc. GST)</span>
+        <span class="amount">$7,117.00</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Terms -->
+  <div class="section">
+    <p class="section-label">Terms &amp; Conditions</p>
+    <div class="terms-box">
+      <h4>Please read before approving</h4>
+      <ul class="terms-list">
+        <li>A 50% deposit ($3,558.50) is required to confirm booking. The remaining balance is due 7 days prior to installation.</li>
+        <li>The hire period commences on the day of installation and expires at the agreed end date. Extensions are charged at the weekly rate listed above.</li>
+        <li>All furniture and accessories remain the property of Your Styling Co. and must not be moved, sold, or damaged. Client accepts responsibility for items during the hire period.</li>
+        <li>Cancellation within 72 hours of confirmed installation date forfeits the 50% deposit. Rescheduling is accepted with 5+ business days notice.</li>
+        <li>This quote is valid for 14 days from the issue date. After this period, pricing is subject to change.</li>
+        <li>Items are subject to availability at time of booking confirmation. Substitutions of equivalent value and style may be made where necessary.</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- Client Details & Signature -->
+  <div class="section">
+    <p class="section-label">Your Details &amp; Approval</p>
+    <div class="form-card" id="approval-form">
+      <div class="form-grid">
+        <div class="form-group">
+          <label>Full Name</label>
+          <input type="text" id="client-name" placeholder="e.g. Sarah Johnson" />
+        </div>
+        <div class="form-group">
+          <label>Email Address</label>
+          <input type="email" id="client-email" placeholder="e.g. sarah@email.com" />
+        </div>
+        <div class="form-group">
+          <label>Phone Number</label>
+          <input type="tel" id="client-phone" placeholder="e.g. 0412 345 678" />
+        </div>
+        <div class="form-group">
+          <label>Property Address</label>
+          <input type="text" id="client-address" placeholder="Confirm property address" />
+        </div>
+        <div class="form-group full">
+          <label>Notes or Questions (optional)</label>
+          <textarea id="client-notes" rows="3" placeholder="Any special requests or questions for us..."></textarea>
+        </div>
+        <div class="form-group full">
+          <label>Signature — draw below to approve</label>
+          <div class="sig-wrap">
+            <canvas id="sig-canvas"></canvas>
+            <span class="sig-label" id="sig-placeholder">Sign here</span>
+          </div>
+          <div class="sig-actions">
+            <button class="btn-clear" onclick="clearSignature()">Clear signature</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="action-section">
+        <button class="btn-approve" onclick="submitApproval('approved')">Approve &amp; Accept Quote</button>
+        <button class="btn-decline" onclick="submitApproval('declined')">Decline Quote</button>
+      </div>
+    </div>
+
+    <div class="confirmation approved" id="confirm-approved">
+      <div class="confirmation-icon">✓</div>
+      <h3>Quote Approved</h3>
+      <p>Thank you! We've received your approval. Our team will be in touch within 1 business day to confirm your installation date and arrange the deposit.</p>
+    </div>
+
+    <div class="confirmation declined" id="confirm-declined">
+      <div class="confirmation-icon">✕</div>
+      <h3>Quote Declined</h3>
+      <p>No worries at all. We've noted your response. If you'd like to discuss adjustments or have any questions, please don't hesitate to reach out.</p>
+    </div>
+  </div>
+
+  <div class="footer">
+    <p>Your Styling Co. · hello@yourstylingco.com.au · (03) 9000 0000 · ABN 00 000 000 000</p>
+  </div>
+
+</div>
+
+<script>
+  const canvas = document.getElementById('sig-canvas');
+  const ctx = canvas.getContext('2d');
+  let drawing = false;
+  let hasSig = false;
+
+  function resizeCanvas() {
+    const rect = canvas.getBoundingClientRect();
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = rect.width * dpr;
+    canvas.height = rect.height * dpr;
+    ctx.scale(dpr, dpr);
+    ctx.strokeStyle = '#2C2825';
+    ctx.lineWidth = 1.8;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+  }
+
+  resizeCanvas();
+  window.addEventListener('resize', resizeCanvas);
+
+  function getPos(e) {
+    const rect = canvas.getBoundingClientRect();
+    if (e.touches) {
+      return { x: e.touches[0].clientX - rect.left, y: e.touches[0].clientY - rect.top };
+    }
+    return { x: e.clientX - rect.left, y: e.clientY - rect.top };
+  }
+
+  canvas.addEventListener('mousedown', e => { drawing = true; const p = getPos(e); ctx.beginPath(); ctx.moveTo(p.x, p.y); });
+  canvas.addEventListener('mousemove', e => { if (!drawing) return; const p = getPos(e); ctx.lineTo(p.x, p.y); ctx.stroke(); hasSig = true; document.getElementById('sig-placeholder').style.display = 'none'; });
+  canvas.addEventListener('mouseup', () => drawing = false);
+  canvas.addEventListener('mouseleave', () => drawing = false);
+  canvas.addEventListener('touchstart', e => { e.preventDefault(); drawing = true; const p = getPos(e); ctx.beginPath(); ctx.moveTo(p.x, p.y); }, { passive: false });
+  canvas.addEventListener('touchmove', e => { e.preventDefault(); if (!drawing) return; const p = getPos(e); ctx.lineTo(p.x, p.y); ctx.stroke(); hasSig = true; document.getElementById('sig-placeholder').style.display = 'none'; }, { passive: false });
+  canvas.addEventListener('touchend', () => drawing = false);
+
+  function clearSignature() {
+    const rect = canvas.getBoundingClientRect();
+    ctx.clearRect(0, 0, rect.width, rect.height);
+    hasSig = false;
+    document.getElementById('sig-placeholder').style.display = 'block';
+  }
+
+  function submitApproval(type) {
+    const name = document.getElementById('client-name').value.trim();
+    const email = document.getElementById('client-email').value.trim();
+
+    if (type === 'approved') {
+      if (!name || !email) { alert('Please enter your name and email address before approving.'); return; }
+      if (!hasSig) { alert('Please sign the quote before approving.'); return; }
+    }
+
+    document.getElementById('approval-form').style.display = 'none';
+    if (type === 'approved') {
+      document.getElementById('confirm-approved').style.display = 'block';
+    } else {
+      document.getElementById('confirm-declined').style.display = 'block';
+    }
+
+    document.getElementById('confirm-' + type).scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
+</script>
+</body>
+</html>

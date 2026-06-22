@@ -1,0 +1,206 @@
+# Homazing Automated Quoting System — Project Scope
+
+## Overview
+Manoj (Homazing owner) needs to quickly generate professional property styling quotes for real estate agents. This system automates the entire process end-to-end: Manoj chats with an AI agent via Telegram → AI calculates the price → a quote is created in Zoho CRM → a branded web page is sent to the client for approval → approval flows back into Zoho to generate and email the invoice.
+
+---
+
+## System Architecture
+
+```
+Manoj (Telegram Bot)
+        ↓
+  Python AI Agent  ←→  Pricing Engine (Costing Template.xltx)
+        ↓
+  Zoho CRM API  →  Quote created
+        ↓
+  Quote URL  →  Homazing website /quote/[id]
+                        ↓
+                Client fills form + signs
+                        ↓
+              Next.js API → Zoho CRM
+                        ↓
+              Invoice generated + emailed to client
+```
+
+---
+
+## Phase 1 — Zoho Setup (Manual)
+
+**Zoho CRM**
+- Sign up for Zoho CRM (Free tier to start; Standard for more automation)
+- Create a Connected App under Developer Hub → get Client ID + Secret for OAuth
+- Custom fields to add on Quotes module:
+  - `GST_Amount` (Currency)
+  - `Subtotal_ex_GST` (Currency)
+  - `Referring_Agent` (Lookup to Contacts)
+- Create a Pipeline called "Styling Jobs" with stages: Quoted → Approved → Invoiced
+- Enable the Quotes and Invoices modules
+
+**Invoicing — Zoho CRM native module (no Zoho Books needed)**
+- Enable the Invoices module within Zoho CRM (built-in, no extra subscription)
+- Set up GST rate (10%) in CRM tax settings
+- Configure invoice email template in CRM
+- Install the Zoho CRM ↔ QuickBooks connector (Zoho Marketplace or Zapier) to auto-sync invoices into QuickBooks for accounting
+
+---
+
+## Phase 2 — Pricing Engine
+
+**Source file**: `Docs/Costing Template.xltx`
+
+**Room unit costs (all prices inc. GST):**
+
+| Room            | Unit Cost |
+|-----------------|-----------|
+| Master Bedroom  | $450      |
+| Guest Bedroom   | $350      |
+| Living          | $450      |
+| Dining          | $350      |
+| Kitchen         | $100      |
+| Alfresco        | $150      |
+| Bath            | $50       |
+| Hallway Table   | $100      |
+| Study           | $300      |
+| Small Living    | $300      |
+
+**Calculation logic:**
+1. Sub Total = sum of (qty × unit cost) per room
+2. Added % (optional) = Sub Total × added_pct
+3. Reduced % (optional) = Sub Total × reduced_pct
+4. Referral (optional) = (Sub Total + Added − Reduced) × referral_pct
+5. Total = MROUND(Sub Total + Added − Reduced + Referral, 10) — already inc. GST
+6. GST component = Total ÷ 11
+7. Subtotal ex-GST = Total − GST
+
+**Tool**: `tools/calculate_price.py`
+- Inputs: rooms dict, referral_pct (optional), added_pct (optional), reduced_pct (optional)
+- Outputs: `{line_items, subtotal, added, reduced, referral, total_inc_gst, gst, subtotal_ex_gst}`
+
+---
+
+## Phase 3 — Telegram Bot (Manoj's chat interface)
+
+Manoj uses a private Telegram bot as the interface to the AI agent. Telegram is the recommended channel for internal use — free, instant setup, no business verification required.
+
+- Create bot via @BotFather → store token in `.env` as `TELEGRAM_BOT_TOKEN`
+- `tools/send_telegram.py` — sends messages to Manoj's chat ID
+- `tools/telegram_webhook.py` — receives incoming messages via polling
+
+---
+
+## Phase 4 — AI Conversation Agent
+
+**Tool**: `tools/quote_agent.py`
+Uses Claude API (`claude-sonnet-4-6`) to manage a multi-turn conversation. State stored in `.tmp/session_{chat_id}.json`.
+
+**Conversation flow:**
+```
+Manoj:  "3 bed, 2 living, 1 dining"
+Agent:  "Is there a referral on this job? If so, what %?"
+Manoj:  "Yes, 5%"  (or "No")
+Agent:  "Total: $X,XXX (inc. GST) | GST: $XXX | Ex-GST: $X,XXX. Confirm?"
+Manoj:  "Reduce by 10%"  (optional adjustment)
+Agent:  "Revised Total: $X,XXX. Confirm?"
+Manoj:  "Yes"
+Agent:  "What's the RE agent's name?"
+Manoj:  "Jane Smith"
+Agent:  [Zoho lookup] → "Jane Smith found. Creating quote..."
+  OR  → "Jane Smith not found. Please provide full name, email and mobile."
+Manoj:  provides details
+Agent:  [creates contact + quote in Zoho] → "Quote created! Here's the link: ..."
+```
+
+**State machine stages**: COLLECT_ROOMS → ASK_REFERRAL → CONFIRM_PRICE → ADJUST_PRICE (optional) → GET_AGENT → GET_AGENT_DETAILS (if new) → DONE
+
+---
+
+## Phase 5 — Zoho CRM Integration
+
+All tools use OAuth2 with auto-refresh. Token stored in `.tmp/zoho_token.json`.
+
+| Tool | Purpose |
+|------|---------|
+| `tools/zoho_auth.py` | OAuth2 flow + token refresh |
+| `tools/zoho_lookup_contact.py` | Search contacts by name |
+| `tools/zoho_create_contact.py` | Create new RE agent contact |
+| `tools/zoho_create_quote.py` | Create quote with line items + GST breakdown |
+| `tools/zoho_get_quote_url.py` | Retrieve the public quote URL |
+| `tools/zoho_approve_quote.py` | Mark quote approved, move pipeline stage |
+| `tools/zoho_create_client_contact.py` | Create client contact, link to RE agent |
+| `tools/zoho_create_invoice.py` | Convert approved quote → invoice (via CRM Invoices module) |
+| `tools/zoho_email_invoice.py` | Email invoice to client via Zoho CRM |
+
+**Quote creation rules:**
+- Quote filed under the RE agent's contact in Zoho CRM
+- If RE agent does not exist → collect full name, email, mobile → create contact first
+- Quote shows total inc. GST, with GST component displayed separately
+- Quote moves through pipeline: Quoted → Approved → Invoiced
+
+---
+
+## Phase 6 — Dynamic Quote Web Page
+
+**Location**: Homazing Next.js website (existing codebase)
+
+**New files:**
+- `app/quote/[id]/page.tsx` — server component, fetches quote data from Zoho, renders branded quote page
+- `app/api/quote/[id]/route.ts` — GET: fetches quote data from Zoho CRM by quote ID
+- `app/api/quote/approve/route.ts` — POST: receives form submission, triggers Zoho updates
+
+**Quote page content** (based on `Docs/property-styling-quote_1.html` design):
+- Header: quote number, issue date, prepared by, prepared for
+- Status badge: Awaiting Approval / Approved / Declined
+- Property details card
+- Line items table (room types, quantities, prices)
+- Summary: Subtotal ex-GST / GST (10%) / Total inc. GST
+- Terms & conditions
+- Client details form: Full Name, Email, Phone, Property Address, Notes
+- Canvas signature pad
+- Approve & Accept / Decline buttons
+
+**On client approval (POST to `/api/quote/approve`):**
+1. Mark quote as Approved in Zoho CRM → move to Approved pipeline stage
+2. Create client contact in Zoho CRM (if not exists); link as sub-contact under the RE agent where possible
+3. Update quote/order with client's details
+4. Convert quote → invoice via Zoho CRM Invoices module
+5. Email invoice to client
+
+---
+
+## Build Order
+
+1. Zoho account setup (manual) — CRM + OAuth credentials + QuickBooks connector
+2. `tools/calculate_price.py` — verify totals match Excel manually
+3. Telegram bot + polling — confirm send/receive working
+4. `tools/quote_agent.py` — full conversation flow with Claude
+5. Zoho tools — auth → contact lookup/create → quote creation
+6. Quote web page — port HTML design to Next.js, wire API routes
+7. End-to-end test — walk through full flow from Telegram to invoice email
+
+---
+
+## Critical Files
+
+| Path | Role |
+|------|------|
+| `Docs/Costing Template.xltx` | Pricing source |
+| `Docs/property-styling-quote_1.html` | Quote page design reference |
+| `tools/calculate_price.py` | Pricing engine |
+| `tools/quote_agent.py` | AI conversation agent |
+| `tools/zoho_*.py` | Zoho CRM integration |
+| `tools/telegram_webhook.py` | Telegram bot handler |
+| `homazing-website/app/quote/[id]/page.tsx` | Dynamic quote page |
+| `homazing-website/app/api/quote/[id]/route.ts` | Quote data API |
+| `homazing-website/app/api/quote/approve/route.ts` | Approval handler |
+| `.env` | API keys: Telegram, Zoho, Claude |
+
+---
+
+## Verification / Testing
+
+1. **Pricing**: Run `python tools/calculate_price.py` with sample rooms → verify totals match manual Excel calculation
+2. **Telegram**: Send a message to the bot → confirm AI response received
+3. **Full quote flow**: Walk through entire Telegram conversation → confirm Zoho quote appears with correct GST breakdown
+4. **Quote page**: Visit `/quote/{test-id}` on the website → confirm all data renders correctly
+5. **Approval**: Submit the form with test client details → confirm Zoho shows Approved, invoice emailed to test address
