@@ -280,14 +280,12 @@ def _do_create_quote(chat_id: str, session: dict) -> str:
         else:
             email_status = "No email on file"
 
-        address = data.get("address", "property")
         return (
             f"Quote created in Zoho\n"
             f"Quote: {quote['quote_number']}\n"
             f"Agent: {data['agent_name']}\n"
             f"Total: ${data['pricing']['total_inc_gst']:,.0f} inc GST\n\n"
-            f"{email_status}\n\n"
-            f"[Property styling quote for {address}]({approval_url})"
+            f"{email_status}"
         )
     except Exception as e:
         return f"Quote creation failed: {e}\nSend /new to try again."
@@ -365,12 +363,10 @@ def _do_resend_quote(chat_id: str, session: dict, new_pricing: dict) -> str:
             email_status = "No email on file"
 
         _clear_session(chat_id)
-        address = data.get("address", "property")
         return (
             f"Quote *{quote_number}* updated.\n"
             f"New total: ${new_pricing['total_inc_gst']:,.0f} inc GST\n\n"
-            f"{email_status}\n\n"
-            f"[Property styling quote for {address}]({approval_url})"
+            f"{email_status}"
         )
     except Exception as e:
         return f"Quote update failed: {e}"
