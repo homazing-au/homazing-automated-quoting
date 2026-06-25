@@ -259,7 +259,7 @@ def _do_create_quote(chat_id: str, session: dict) -> str:
                 email_status = f"Approval link emailed to {agent_email}"
             except Exception as email_err:
                 print(f"Email send failed: {email_err}")
-                email_status = f"Email failed — send manually"
+                email_status = f"Email failed: {email_err}"
         else:
             email_status = "No email on file"
 
