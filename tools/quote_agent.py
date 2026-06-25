@@ -180,6 +180,22 @@ def _load_quote_record(quote_number: str) -> dict | None:
     return None
 
 
+def _format_address(text: str) -> str:
+    raw = _ask_claude(
+        f"Format this Australian property address into: "
+        f"\"Street Number Street Name, Suburb, STATE Postcode\". "
+        f"Rules: title-case all words; abbreviated state in uppercase (VIC, NSW, QLD, SA, WA, TAS, ACT, NT); "
+        f"add commas between street, suburb, and state+postcode; "
+        f"infer state and postcode from suburb if not provided. "
+        f"Return JSON only: {{\"formatted\": \"...\"}}. "
+        f"Address: {text}"
+    )
+    try:
+        return json.loads(raw).get("formatted") or text.title()
+    except Exception:
+        return text.title()
+
+
 def _extract_agent_details(text: str) -> dict | None:
     raw = _ask_claude(
         f"Extract contact details from this message. "
@@ -263,13 +279,14 @@ def _do_create_quote(chat_id: str, session: dict) -> str:
         else:
             email_status = "No email on file"
 
+        address = data.get("address", "property")
         return (
             f"Quote created in Zoho\n"
             f"Quote: {quote['quote_number']}\n"
             f"Agent: {data['agent_name']}\n"
             f"Total: ${data['pricing']['total_inc_gst']:,.0f} inc GST\n\n"
             f"{email_status}\n\n"
-            f"Approval link:\n{approval_url}"
+            f"[Property styling quote for {address}]({approval_url})"
         )
     except Exception as e:
         return f"Quote creation failed: {e}\nSend /new to try again."
@@ -347,11 +364,12 @@ def _do_resend_quote(chat_id: str, session: dict, new_pricing: dict) -> str:
             email_status = "No email on file"
 
         _clear_session(chat_id)
+        address = data.get("address", "property")
         return (
             f"Quote *{quote_number}* updated.\n"
             f"New total: ${new_pricing['total_inc_gst']:,.0f} inc GST\n\n"
             f"{email_status}\n\n"
-            f"Approval link:\n{approval_url}"
+            f"[Property styling quote for {address}]({approval_url})"
         )
     except Exception as e:
         return f"Quote update failed: {e}"
@@ -384,11 +402,11 @@ def handle_message(chat_id: str, text: str, reply_to_id: int | None = None) -> s
 
     # ── GET_ADDRESS ────────────────────────────────────────────────────────────
     if stage == "GET_ADDRESS":
-        data["address"] = text
+        data["address"] = _format_address(text)
         session["stage"] = "COLLECT_ROOMS"
         _save_session(chat_id, session)
         return (
-            f"Got it: *{text}*\n\n"
+            f"Got it: *{data['address']}*\n\n"
             f"How many bedrooms? Any alfresco or extra living areas?\n"
             f"e.g. *3 bed*, *3 bed 1 kids, 1 alfresco*, *4 bed, 2 living*\n\n"
             f"_(1 living, 1 dining, 1 kitchen, 1 bath, 1 hallway included by default)_\n\n"
