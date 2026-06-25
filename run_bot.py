@@ -30,6 +30,9 @@ def _cleanup_pid():
         pass
 
 if __name__ == "__main__":
+    import time
+    print("Waiting 30s for any previous connection to close...")
+    time.sleep(30)
     _check_already_running()
     try:
         from tools.telegram_webhook import main
