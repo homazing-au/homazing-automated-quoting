@@ -76,8 +76,9 @@ def main():
         except Exception as e:
             msg = str(e)
             if "409" in msg and "Conflict" in msg:
-                print("ERROR: Another bot instance is already running. Exiting to avoid duplicate processing.")
-                sys.exit(1)
+                print("WARNING: 409 Conflict — previous connection still closing. Retrying in 15s...")
+                time.sleep(15)
+                continue
             print(f"Error: {e}")
             time.sleep(5)
 
