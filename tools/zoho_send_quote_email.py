@@ -1,14 +1,10 @@
-"""Send approval email via Zoho Mail SMTP and mark CRM quote stage as Delivered."""
+"""Send approval email via MailerSend and mark CRM quote stage as Delivered."""
 
 import os
-import smtplib
-from email.mime.multipart import MIMEMultipart
-from email.mime.text import MIMEText
-
 import requests
 from tools.zoho_auth import get_access_token
 
-CRM_BASE = "https://www.zohoapis.com.au/crm/v2"
+CRM_BASE   = "https://www.zohoapis.com.au/crm/v2"
 ADMIN_EMAIL = "admin@homazing.com.au"
 
 
@@ -20,6 +16,8 @@ def send_quote_email(
     address: str,
     approval_url: str,
 ) -> None:
+    api_key  = os.getenv("MAILERSEND_API_KEY")
+    from_email = os.getenv("FROM_EMAIL", "admin@homazing.com.au")
     first_name = agent_name.strip().split()[0] if agent_name.strip() else agent_name
     link_label = f"Property styling quote for {address}"
 
@@ -51,23 +49,25 @@ def send_quote_email(
 </body>
 </html>"""
 
-    msg = MIMEMultipart("alternative")
-    msg.attach(MIMEText(plain, "plain"))
-    msg.attach(MIMEText(html, "html"))
-    msg["Subject"] = f"Homazing Quote - {address}"
-    msg["From"]    = os.getenv("EMAIL_FROM", "Homazing <admin@homazing.com.au>")
-    msg["To"]      = to_email
-    msg["Cc"]      = ADMIN_EMAIL
+    payload = {
+        "from":    {"email": from_email, "name": "Homazing"},
+        "to":      [{"email": to_email, "name": agent_name}],
+        "cc":      [{"email": ADMIN_EMAIL}],
+        "subject": f"Homazing Quote - {address}",
+        "text":    plain,
+        "html":    html,
+    }
 
-    host     = os.getenv("EMAIL_HOST", "smtp.zoho.com.au")
-    port     = int(os.getenv("EMAIL_PORT", 587))
-    user     = os.getenv("EMAIL_USER")
-    password = os.getenv("EMAIL_PASSWORD")
-
-    with smtplib.SMTP(host, port) as s:
-        s.starttls()
-        s.login(user, password)
-        s.sendmail(msg["From"], [to_email, ADMIN_EMAIL], msg.as_string())
+    resp = requests.post(
+        "https://api.mailersend.com/v1/email",
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type":  "application/json",
+        },
+        json=payload,
+        timeout=15,
+    )
+    resp.raise_for_status()
 
     # Mark CRM quote stage as Delivered
     token = get_access_token()
