@@ -62,7 +62,11 @@ def main():
                 is_command = text.lower() in ("/new", "/start", "/reset")
                 prev_stage = _load_session(chat_id).get("stage", "") if not is_command else ""
                 send_typing(chat_id)
-                reply = handle_message(chat_id, text, reply_to_id=reply_to_id)
+                try:
+                    reply = handle_message(chat_id, text, reply_to_id=reply_to_id)
+                except Exception as handler_err:
+                    print(f"handle_message error: {handler_err}")
+                    reply = f"Something went wrong: {handler_err}\n\nSend /new to start again."
                 if reply:
                     msg_id = send(reply, chat_id)
                     # Tag this bot message with the stage it confirmed (not the next stage)

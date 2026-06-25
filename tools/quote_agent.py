@@ -209,7 +209,7 @@ def _format_price_summary(pricing: dict) -> str:
 def _do_create_quote(chat_id: str, session: dict) -> str:
     from tools.zoho_create_quote import create_quote
     from tools.zoho_send_quote_email import send_quote_email
-    import base64, subprocess
+    import base64
     data = session["data"]
     try:
         quote = create_quote(data["account_id"], data["pricing"], data.get("address", ""))
@@ -242,7 +242,6 @@ def _do_create_quote(chat_id: str, session: dict) -> str:
 
         print(f"\nApproval URL: {approval_url}\n")
         (SESSION_DIR / "last_approval_url.txt").write_text(approval_url)
-        subprocess.Popen(["cmd", "/c", "start", "chrome", approval_url])
 
         # Send email to agent if we have their email
         agent_email = data.get("agent_email", "")
@@ -260,16 +259,17 @@ def _do_create_quote(chat_id: str, session: dict) -> str:
                 email_status = f"Approval link emailed to {agent_email}"
             except Exception as email_err:
                 print(f"Email send failed: {email_err}")
-                email_status = f"Email failed ({agent_email}) — link opened in Chrome"
+                email_status = f"Email failed — send manually"
         else:
-            email_status = "No email on file — approval link opened in Chrome"
+            email_status = "No email on file"
 
         return (
             f"Quote created in Zoho\n"
             f"Quote: {quote['quote_number']}\n"
             f"Agent: {data['agent_name']}\n"
             f"Total: ${data['pricing']['total_inc_gst']:,.0f} inc GST\n\n"
-            f"{email_status}"
+            f"{email_status}\n\n"
+            f"Approval link:\n{approval_url}"
         )
     except Exception as e:
         return f"Quote creation failed: {e}\nSend /new to try again."
@@ -293,7 +293,7 @@ def _start_edit_quote(chat_id: str, quote_number: str) -> str:
 def _do_resend_quote(chat_id: str, session: dict, new_pricing: dict) -> str:
     from tools.zoho_update_quote import update_quote_amount
     from tools.zoho_send_quote_email import send_quote_email
-    import base64, subprocess
+    import base64
     data = session["data"]
     quote_number = data["quote_number"]
     try:
@@ -326,7 +326,6 @@ def _do_resend_quote(chat_id: str, session: dict, new_pricing: dict) -> str:
 
         print(f"\nApproval URL: {approval_url}\n")
         (SESSION_DIR / "last_approval_url.txt").write_text(approval_url)
-        subprocess.Popen(["cmd", "/c", "start", "chrome", approval_url])
 
         agent_email = data.get("agent_email", "")
         email_status = ""
@@ -343,15 +342,16 @@ def _do_resend_quote(chat_id: str, session: dict, new_pricing: dict) -> str:
                 email_status = f"Updated approval link emailed to {agent_email}"
             except Exception as email_err:
                 print(f"Email send failed: {email_err}")
-                email_status = f"Email failed ({agent_email}) — link opened in Chrome"
+                email_status = f"Email failed — send manually"
         else:
-            email_status = "No email on file — approval link opened in Chrome"
+            email_status = "No email on file"
 
         _clear_session(chat_id)
         return (
             f"Quote *{quote_number}* updated.\n"
             f"New total: ${new_pricing['total_inc_gst']:,.0f} inc GST\n\n"
-            f"{email_status}"
+            f"{email_status}\n\n"
+            f"Approval link:\n{approval_url}"
         )
     except Exception as e:
         return f"Quote update failed: {e}"

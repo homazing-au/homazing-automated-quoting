@@ -117,11 +117,38 @@ def _refresh_token(refresh_token: str) -> dict:
 def get_access_token() -> str:
     """Return a valid access token, refreshing if needed."""
     if not TOKEN_FILE.exists():
-        raise RuntimeError("Not authorised. Run: python tools/zoho_auth.py")
+        # Bootstrap from env var (e.g. first run on Render where .tmp/ is ephemeral)
+        refresh_token = os.getenv("ZOHO_REFRESH_TOKEN")
+        if not refresh_token:
+            raise RuntimeError("Not authorised. Run: python tools/zoho_auth.py")
+        _bootstrap_token(refresh_token)
     token = json.loads(TOKEN_FILE.read_text())
     if time.time() >= token.get("expires_at", 0):
         token = _refresh_token(token["refresh_token"])
     return token["access_token"]
+
+
+def _bootstrap_token(refresh_token: str):
+    """Fetch an access token using the env ZOHO_REFRESH_TOKEN and write a token file."""
+    resp = requests.post(
+        "https://accounts.zoho.com.au/oauth/v2/token",
+        params={
+            "grant_type":    "refresh_token",
+            "client_id":     CLIENT_ID,
+            "client_secret": CLIENT_SECRET,
+            "refresh_token": refresh_token,
+        },
+    )
+    resp.raise_for_status()
+    data = resp.json()
+    if "access_token" not in data:
+        raise RuntimeError(f"Zoho token bootstrap failed: {data}")
+    TOKEN_FILE.parent.mkdir(exist_ok=True)
+    TOKEN_FILE.write_text(json.dumps({
+        "access_token":  data["access_token"],
+        "refresh_token": refresh_token,
+        "expires_at":    time.time() + data.get("expires_in", 3600) - 60,
+    }, indent=2))
 
 
 
