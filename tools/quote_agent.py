@@ -47,12 +47,13 @@ MROUND rounds the total to nearest $10.
 """
 
 
-STAGE_ORDER = ["GET_ADDRESS", "COLLECT_ROOMS", "ASK_REFERRAL", "CONFIRM_PRICE", "GET_AGENT", "GET_AGENT_DETAILS"]
+STAGE_ORDER = ["GET_ADDRESS", "COLLECT_ROOMS", "CONFIRM_ROOMS", "ASK_REFERRAL", "CONFIRM_PRICE", "GET_AGENT", "GET_AGENT_DETAILS"]
 
 # Data keys to clear when reverting to each stage (clears that stage + all later stages)
 STAGE_CLEAR_KEYS = {
     "GET_ADDRESS":       ["address"],
     "COLLECT_ROOMS":     ["rooms"],
+    "CONFIRM_ROOMS":     [],
     "ASK_REFERRAL":      ["referral_pct", "pricing"],
     "CONFIRM_PRICE":     ["reduced_pct", "added_pct"],
     "GET_AGENT":         ["account_id", "agent_name", "agent_email"],
@@ -425,15 +426,28 @@ def handle_message(chat_id: str, text: str, reply_to_id: int | None = None) -> s
             if key not in rooms:
                 rooms[key] = qty
         data["rooms"] = rooms
-        session["stage"] = "ASK_REFERRAL"
+        session["stage"] = "CONFIRM_ROOMS"
         _save_session(chat_id, session)
 
-        room_list = ", ".join(f"{ROOM_LABELS[k]} ×{v}" for k, v in rooms.items())
+        room_list = "\n".join(f"  • {ROOM_LABELS[k]} ×{v}" for k, v in rooms.items())
         return (
-            f"Got it: {room_list}\n\n"
-            f"Is there a referral on this job? If so, what %? (or say *no*)\n\n"
-            f"_💡 To edit rooms, reply directly to this message._"
+            f"Got it:\n{room_list}\n\n"
+            f"OK to proceed? _(or reply to this message to edit rooms)_"
         )
+
+    # ── CONFIRM_ROOMS ──────────────────────────────────────────────────────────
+    if stage == "CONFIRM_ROOMS":
+        confirmed = _extract_yes_no(text)
+        if confirmed is False:
+            session["stage"] = "COLLECT_ROOMS"
+            _save_session(chat_id, session)
+            return "No problem. How many rooms? e.g. *3 bed* or *3 bed, 1 alfresco*"
+        if confirmed is True or text.lower() in ("ok", "okay", "yes", "yep", "sure", "correct"):
+            session["stage"] = "ASK_REFERRAL"
+            _save_session(chat_id, session)
+            return "Is there a referral on this job? If so, what %? (or say *no*)"
+        # Any other text — re-ask
+        return "Reply *OK* to confirm the rooms, or *no* to re-enter them."
 
     # ── ASK_REFERRAL ───────────────────────────────────────────────────────────
     if stage == "ASK_REFERRAL":
