@@ -6,13 +6,15 @@ from tools.zoho_auth import get_access_token
 CRM_BASE = "https://www.zohoapis.com.au/crm/v2"
 
 
-def create_account(account_name: str, phone: str = "") -> dict:
+def create_account(account_name: str, phone: str = "", email: str = "") -> dict:
     token   = get_access_token()
     headers = {"Authorization": f"Zoho-oauthtoken {token}"}
 
     record = {"Account_Name": account_name}
     if phone:
         record["Phone"] = phone
+    if email:
+        record["Email"] = email
 
     resp = requests.post(
         f"{CRM_BASE}/Accounts",
@@ -26,6 +28,7 @@ def create_account(account_name: str, phone: str = "") -> dict:
         "id":           crm_id,
         "Account_Name": account_name,
         "Phone":        phone,
+        "Email":        email,
     }
 
 

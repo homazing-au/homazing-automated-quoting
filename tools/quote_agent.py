@@ -531,8 +531,8 @@ def handle_message(chat_id: str, text: str, reply_to_id: int | None = None) -> s
             _save_session(chat_id, session)
             return (
                 f"*{text}* not found in Zoho.\n"
-                f"Please provide the agency name and phone — e.g.\n"
-                f"_Ray White Clayton, 03 9123 4567_"
+                f"Please provide their name, mobile and email — e.g.\n"
+                f"_Jane Smith, 0412 345 678, jane@raywhite.com_"
             )
 
     # ── GET_AGENT_DETAILS — create new Account ─────────────────────────────────
@@ -540,11 +540,11 @@ def handle_message(chat_id: str, text: str, reply_to_id: int | None = None) -> s
         from tools.zoho_create_account import create_account
         details = _extract_agent_details(text)
         if not details or not details.get("name"):
-            return "Please provide the agency name and phone — e.g. _Ray White Clayton, 03 9123 4567_"
-        account = create_account(details["name"], details.get("mobile", ""))
+            return "Please provide their name, mobile and email — e.g. _Jane Smith, 0412 345 678, jane@raywhite.com_"
+        account = create_account(details["name"], details.get("mobile", ""), details.get("email", ""))
         data["account_id"] = account["id"]
         data["agent_name"] = account["Account_Name"]
-        data["agent_email"] = ""
+        data["agent_email"] = details.get("email", "")
         session["data"] = data
         _save_session(chat_id, session)
         return f"Account created for *{account['Account_Name']}*.\n" + _do_create_quote(chat_id, session)
