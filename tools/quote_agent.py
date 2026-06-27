@@ -232,6 +232,7 @@ def _do_create_quote(chat_id: str, session: dict) -> str:
         quote = create_quote(data["account_id"], data["pricing"], data.get("address", ""))
         token_data = json.dumps({
             "qn":  quote["quote_number"],
+            "qi":  quote["id"],
             "ag":  data["agent_name"],
             "ae":  data.get("agent_email", ""),
             "pr":  data["pricing"],
@@ -317,6 +318,7 @@ def _do_resend_quote(chat_id: str, session: dict, new_pricing: dict) -> str:
 
         token_data = json.dumps({
             "qn":  quote_number,
+            "qi":  data.get("quote_id", ""),
             "ag":  data.get("agent_name", ""),
             "ae":  data.get("agent_email", ""),
             "pr":  new_pricing,
