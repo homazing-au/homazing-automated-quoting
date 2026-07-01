@@ -501,6 +501,35 @@ def handle_message(chat_id: str, text: str, reply_to_id: int | None = None) -> s
             summary = _format_price_summary(pricing)
             return f"Revised:\n{summary}\n\nConfirm?"
 
+        # Flat dollar override — e.g. "make it 2400" / "$2,400" / "set to 2500"
+        if "%" not in text:
+            flat_total = _extract_amount(text)
+            if flat_total and flat_total > 100:
+                new_total = mround(flat_total, 10)
+                pricing = data["pricing"]
+                gst = round(new_total / 11, 2)
+                subtotal_ex_gst = round(new_total - gst, 2)
+                delta = new_total - pricing["total_inc_gst"]
+                added   = pricing.get("added", 0)
+                reduced = pricing.get("reduced", 0)
+                if delta >= 0:
+                    added += delta
+                else:
+                    reduced += -delta
+                new_pricing = {
+                    **pricing,
+                    "total_inc_gst":   new_total,
+                    "gst":             gst,
+                    "subtotal_ex_gst": subtotal_ex_gst,
+                    "added":           round(added, 2),
+                    "reduced":         round(reduced, 2),
+                }
+                data["pricing"] = new_pricing
+                session["stage"] = "CONFIRM_PRICE"
+                _save_session(chat_id, session)
+                summary = _format_price_summary(new_pricing)
+                return f"Revised:\n{summary}\n\nConfirm?"
+
         confirmed = _extract_yes_no(text)
         if confirmed is True:
             session["stage"] = "GET_AGENT"
@@ -510,7 +539,7 @@ def handle_message(chat_id: str, text: str, reply_to_id: int | None = None) -> s
             _clear_session(chat_id)
             return "Quote cancelled. Send /new to start again."
 
-        return "Confirm the price? Or adjust with *reduce by X%* or *add X%*."
+        return "Confirm the price? Or adjust with *reduce by X%*, *add X%*, or type a flat amount like *2400*."
 
     # ── GET_AGENT ──────────────────────────────────────────────────────────────
     if stage == "GET_AGENT":
