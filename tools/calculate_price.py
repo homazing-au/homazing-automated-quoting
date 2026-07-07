@@ -73,10 +73,11 @@ def calculate_price(
             "amount": amount,
         })
 
-    referral = subtotal * referral_pct
     added    = subtotal * added_pct
     reduced  = subtotal * reduced_pct
-    total_inc_gst   = mround(subtotal + referral + added - reduced, 10)
+    adjusted = subtotal + added - reduced   # referral is on the price after add/reduce
+    referral = adjusted * referral_pct
+    total_inc_gst   = mround(adjusted + referral, 10)
     gst             = round(total_inc_gst / 11, 2)
     subtotal_ex_gst = round(total_inc_gst - gst, 2)
 
