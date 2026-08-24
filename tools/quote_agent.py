@@ -488,57 +488,41 @@ def _start_send_invoice(chat_id: str) -> str:
 
     session = {"stage": "SEND_INVOICE_PICK", "data": {"invoice_candidates": deals}}
     _save_session(chat_id, session)
-    lines = [
-        f"{i + 1}. {d['address']} — {d['contact_name'] or d['account_name'] or 'Unknown'} — ${d['amount']:,.0f}"
-        for i, d in enumerate(deals)
-    ]
+    lines = [f"{i + 1}. {d['address']}" for i, d in enumerate(deals)]
     return "Which job do you want to invoice? Reply with the number:\n\n" + "\n".join(lines)
 
 
 def _do_send_invoice(deal: dict) -> str:
-    from tools.zoho_create_invoice import create_invoice
-    from tools.zoho_send_invoice_email import send_invoice_email
-    from tools.zoho_update_quote import mark_deal_invoiced
-    from tools.zoho_get_email import get_email
+    """Trigger the actual invoice (Zoho + QuickBooks + email) via the homazing-website
+    API — that's where the QBO sync and PDF/email logic already live, same as the
+    system that used to fire automatically on approval. This just moves *when* it fires.
+    """
+    import requests
+    base_url = os.getenv("APPROVAL_BASE_URL", "https://homazing.com.au")
+    secret = os.getenv("CRON_SECRET", "")
     try:
-        total = deal["amount"]
-        gst = round(total / 11, 2)
-        pricing = {
-            "subtotal_ex_gst": round(total - gst, 2),
-            "gst":             gst,
-            "total_inc_gst":   total,
-        }
-
-        invoice = create_invoice(
-            contact_id=deal.get("contact_id") or None,
-            pricing=pricing,
-            address=deal["address"],
-            account_id=deal.get("account_id", ""),
+        resp = requests.post(
+            f"{base_url}/api/send-invoice",
+            headers={"Authorization": f"Bearer {secret}"},
+            json={"deal_id": deal["id"]},
+            timeout=30,
         )
+        resp.raise_for_status()
+        result = resp.json()
+        if "error" in result:
+            return f"Invoice creation failed: {result['error']}"
 
-        customer_email = get_email("Contacts", deal.get("contact_id", ""))
-        agent_email    = get_email("Accounts", deal.get("account_id", ""))
-        to_emails = list(dict.fromkeys(e for e in (customer_email, agent_email) if e))
-
-        if to_emails:
-            send_invoice_email(
-                to_emails=to_emails,
-                contact_name=deal.get("contact_name") or deal.get("account_name") or "Customer",
-                invoice_number=invoice["invoice_number"],
-                address=deal["address"],
-                total_inc_gst=total,
-                pricing=pricing,
-            )
-            email_status = f"Invoice emailed to {', '.join(to_emails)}"
-        else:
-            email_status = "No email on file — send manually"
-
-        mark_deal_invoiced(deal["id"])
+        email_status = (
+            f"Invoice emailed to {', '.join(result.get('to_emails', []))}"
+            if result.get("email_sent") else "No email on file — send manually"
+        )
+        qbo_status = "Synced to QuickBooks" if result.get("qbo_ok") else "QuickBooks sync failed — check Telegram alert"
 
         return (
-            f"Invoice *{invoice['invoice_number']}* created for {deal['address']}\n"
-            f"Total: ${total:,.0f} inc GST\n\n"
-            f"{email_status}"
+            f"Invoice *{result.get('invoice_number', '?')}* created for {deal['address']}\n"
+            f"Total: ${deal['amount']:,.0f} inc GST\n\n"
+            f"{email_status}\n"
+            f"{qbo_status}"
         )
     except Exception as e:
         return f"Invoice creation failed: {e}"
