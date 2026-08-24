@@ -13,7 +13,7 @@ ADMIN_EMAIL = "admin@homazing.com.au"
 
 
 def send_invoice_email(
-    to_email: str,
+    to_emails: list[str],
     contact_name: str,
     invoice_number: str,
     address: str,
@@ -73,11 +73,12 @@ def send_invoice_email(
 </body>
 </html>"""
 
+    to_emails = list(dict.fromkeys(e for e in to_emails if e))  # dedupe, preserve order
+
     msg = MIMEMultipart("mixed")
     msg["Subject"] = f"Homazing Invoice - {address}"
     msg["From"]    = os.getenv("EMAIL_FROM", "Homazing <admin@homazing.com.au>")
-    msg["To"]      = to_email
-    msg["Cc"]      = ADMIN_EMAIL
+    msg["To"]      = ", ".join(to_emails)
 
     # Attach plain + HTML body
     body_part = MIMEMultipart("alternative")
@@ -105,7 +106,9 @@ def send_invoice_email(
     user     = os.getenv("EMAIL_USER")
     password = os.getenv("EMAIL_PASSWORD")
 
+    envelope_to = to_emails if ADMIN_EMAIL in to_emails else [*to_emails, ADMIN_EMAIL]
+
     with smtplib.SMTP(host, port) as s:
         s.starttls()
         s.login(user, password)
-        s.sendmail(msg["From"], [to_email, ADMIN_EMAIL], msg.as_string())
+        s.sendmail(msg["From"], envelope_to, msg.as_string())

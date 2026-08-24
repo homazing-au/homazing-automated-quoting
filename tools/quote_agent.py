@@ -47,7 +47,11 @@ MROUND rounds the total to nearest $10.
 """
 
 
-STAGE_ORDER = ["GET_ADDRESS", "COLLECT_ROOMS", "CONFIRM_ROOMS", "ASK_REFERRAL", "CONFIRM_PRICE", "GET_AGENT", "GET_AGENT_DETAILS"]
+STAGE_ORDER = [
+    "GET_ADDRESS", "COLLECT_ROOMS", "CONFIRM_ROOMS", "ASK_REFERRAL", "CONFIRM_PRICE",
+    "GET_AGENT", "GET_AGENT_DETAILS",
+    "GET_CUSTOMER_DETAILS", "ASK_AGENCY_LINK", "GET_AGENCY_DETAILS_FOR_CUSTOMER",
+]
 
 # Data keys to clear when reverting to each stage (clears that stage + all later stages)
 STAGE_CLEAR_KEYS = {
@@ -56,8 +60,12 @@ STAGE_CLEAR_KEYS = {
     "CONFIRM_ROOMS":     [],
     "ASK_REFERRAL":      ["referral_pct", "pricing"],
     "CONFIRM_PRICE":     ["reduced_pct", "added_pct"],
-    "GET_AGENT":         ["account_id", "agent_name", "agent_email"],
+    "GET_AGENT":         ["account_id", "agent_name", "agent_email",
+                           "customer_name", "customer_email", "customer_mobile", "agency_query"],
     "GET_AGENT_DETAILS": [],
+    "GET_CUSTOMER_DETAILS":           ["customer_name", "customer_email", "customer_mobile"],
+    "ASK_AGENCY_LINK":                ["account_id", "agent_name", "agent_email", "agency_query"],
+    "GET_AGENCY_DETAILS_FOR_CUSTOMER": [],
 }
 
 
@@ -69,7 +77,7 @@ def _load_session(chat_id: str) -> dict:
     f = _session_file(chat_id)
     if f.exists():
         return json.loads(f.read_text())
-    return {"stage": "COLLECT_ROOMS", "data": {}}
+    return {"stage": "GET_ADDRESS", "data": {}}
 
 
 def _save_session(chat_id: str, session: dict):
@@ -235,23 +243,29 @@ def _do_create_quote(chat_id: str, session: dict) -> str:
             "qi":  quote["id"],
             "ag":  data["agent_name"],
             "ae":  data.get("agent_email", ""),
+            "cu":  "",
+            "cue": "",
             "pr":  data["pricing"],
             "rm":  data.get("rooms", {}),
             "addr": data.get("address", ""),
             "aid": data.get("account_id", ""),
             "did": quote.get("deal_id", ""),
+            "cid": "",
         }, separators=(",", ":"))
         token = base64.urlsafe_b64encode(token_data.encode()).decode().rstrip("=")
 
         _save_quote_record(quote["quote_number"], {
-            "quote_id":    quote["id"],
-            "deal_id":     quote.get("deal_id", ""),
-            "account_id":  data.get("account_id", ""),
-            "agent_name":  data.get("agent_name", ""),
-            "agent_email": data.get("agent_email", ""),
-            "address":     data.get("address", ""),
-            "rooms":       data.get("rooms", {}),
-            "pricing":     data["pricing"],
+            "quote_id":      quote["id"],
+            "deal_id":       quote.get("deal_id", ""),
+            "account_id":    data.get("account_id", ""),
+            "contact_id":    "",
+            "agent_name":    data.get("agent_name", ""),
+            "agent_email":   data.get("agent_email", ""),
+            "customer_name": "",
+            "customer_email":"",
+            "address":       data.get("address", ""),
+            "rooms":         data.get("rooms", {}),
+            "pricing":       data["pricing"],
         })
 
         _clear_session(chat_id)
@@ -268,7 +282,7 @@ def _do_create_quote(chat_id: str, session: dict) -> str:
             try:
                 send_quote_email(
                     estimate_id=quote["id"],
-                    to_email=agent_email,
+                    to_emails=[agent_email],
                     agent_name=data["agent_name"],
                     quote_number=quote["quote_number"],
                     address=data.get("address", ""),
@@ -285,6 +299,92 @@ def _do_create_quote(chat_id: str, session: dict) -> str:
             f"Quote created in Zoho\n"
             f"Quote: {quote['quote_number']}\n"
             f"Agent: {data['agent_name']}\n"
+            f"Total: ${data['pricing']['total_inc_gst']:,.0f} inc GST\n\n"
+            f"{email_status}"
+        )
+    except Exception as e:
+        return f"Quote creation failed: {e}\nSend /new to try again."
+
+
+def _do_create_customer_quote(chat_id: str, session: dict) -> str:
+    """Create a quote for a direct customer, optionally linked to an existing RE agency Account."""
+    from tools.zoho_create_quote import create_quote
+    from tools.zoho_create_contact import create_contact
+    from tools.zoho_send_quote_email import send_quote_email
+    import base64
+    data = session["data"]
+    try:
+        account_id = data.get("account_id", "")
+        contact = create_contact(
+            data["customer_name"],
+            data.get("customer_email", ""),
+            data.get("customer_mobile", ""),
+            account_id=account_id,
+        )
+        quote = create_quote(account_id, data["pricing"], data.get("address", ""), contact_id=contact["id"])
+
+        token_data = json.dumps({
+            "qn":  quote["quote_number"],
+            "qi":  quote["id"],
+            "ag":  data.get("agent_name", ""),
+            "ae":  data.get("agent_email", ""),
+            "cu":  data["customer_name"],
+            "cue": data.get("customer_email", ""),
+            "pr":  data["pricing"],
+            "rm":  data.get("rooms", {}),
+            "addr": data.get("address", ""),
+            "aid": account_id,
+            "did": quote.get("deal_id", ""),
+            "cid": contact["id"],
+        }, separators=(",", ":"))
+        token = base64.urlsafe_b64encode(token_data.encode()).decode().rstrip("=")
+
+        _save_quote_record(quote["quote_number"], {
+            "quote_id":      quote["id"],
+            "deal_id":       quote.get("deal_id", ""),
+            "account_id":    account_id,
+            "contact_id":    contact["id"],
+            "agent_name":    data.get("agent_name", ""),
+            "agent_email":   data.get("agent_email", ""),
+            "customer_name": data["customer_name"],
+            "customer_email":data.get("customer_email", ""),
+            "address":       data.get("address", ""),
+            "rooms":         data.get("rooms", {}),
+            "pricing":       data["pricing"],
+        })
+
+        _clear_session(chat_id)
+        base_url = os.getenv("APPROVAL_BASE_URL", "https://homazing.com.au")
+        approval_url = f"{base_url}/approve/{token}"
+
+        print(f"\nApproval URL: {approval_url}\n")
+        (SESSION_DIR / "last_approval_url.txt").write_text(approval_url)
+
+        to_emails = [e for e in (data.get("customer_email", ""), data.get("agent_email", "")) if e]
+        email_status = ""
+        if to_emails:
+            try:
+                send_quote_email(
+                    estimate_id=quote["id"],
+                    to_emails=to_emails,
+                    agent_name=data["customer_name"],
+                    quote_number=quote["quote_number"],
+                    address=data.get("address", ""),
+                    approval_url=approval_url,
+                )
+                email_status = f"Approval link emailed to {', '.join(to_emails)}"
+            except Exception as email_err:
+                print(f"Email send failed: {email_err}")
+                email_status = f"Email failed: {email_err}"
+        else:
+            email_status = "No email on file"
+
+        agency_line = f"Agency: {data['agent_name']}\n" if data.get("agent_name") else "Agency: Direct (none)\n"
+        return (
+            f"Quote created in Zoho\n"
+            f"Quote: {quote['quote_number']}\n"
+            f"Customer: {data['customer_name']}\n"
+            f"{agency_line}"
             f"Total: ${data['pricing']['total_inc_gst']:,.0f} inc GST\n\n"
             f"{email_status}"
         )
@@ -321,43 +421,49 @@ def _do_resend_quote(chat_id: str, session: dict, new_pricing: dict) -> str:
             "qi":  data.get("quote_id", ""),
             "ag":  data.get("agent_name", ""),
             "ae":  data.get("agent_email", ""),
+            "cu":  data.get("customer_name", ""),
+            "cue": data.get("customer_email", ""),
             "pr":  new_pricing,
             "rm":  data.get("rooms", {}),
             "addr": data.get("address", ""),
             "aid": data.get("account_id", ""),
             "did": data.get("deal_id", ""),
+            "cid": data.get("contact_id", ""),
         }, separators=(",", ":"))
         token = base64.urlsafe_b64encode(token_data.encode()).decode().rstrip("=")
         base_url = os.getenv("APPROVAL_BASE_URL", "https://homazing.com.au")
         approval_url = f"{base_url}/approve/{token}"
 
         _save_quote_record(quote_number, {
-            "quote_id":    data["quote_id"],
-            "deal_id":     data.get("deal_id", ""),
-            "account_id":  data.get("account_id", ""),
-            "agent_name":  data.get("agent_name", ""),
-            "agent_email": data.get("agent_email", ""),
-            "address":     data.get("address", ""),
-            "rooms":       data.get("rooms", {}),
-            "pricing":     new_pricing,
+            "quote_id":      data["quote_id"],
+            "deal_id":       data.get("deal_id", ""),
+            "account_id":    data.get("account_id", ""),
+            "contact_id":    data.get("contact_id", ""),
+            "agent_name":    data.get("agent_name", ""),
+            "agent_email":   data.get("agent_email", ""),
+            "customer_name": data.get("customer_name", ""),
+            "customer_email":data.get("customer_email", ""),
+            "address":       data.get("address", ""),
+            "rooms":         data.get("rooms", {}),
+            "pricing":       new_pricing,
         })
 
         print(f"\nApproval URL: {approval_url}\n")
         (SESSION_DIR / "last_approval_url.txt").write_text(approval_url)
 
-        agent_email = data.get("agent_email", "")
+        to_emails = [e for e in (data.get("customer_email", ""), data.get("agent_email", "")) if e]
         email_status = ""
-        if agent_email:
+        if to_emails:
             try:
                 send_quote_email(
                     estimate_id=data["quote_id"],
-                    to_email=agent_email,
-                    agent_name=data.get("agent_name", ""),
+                    to_emails=to_emails,
+                    agent_name=data.get("customer_name") or data.get("agent_name", ""),
                     quote_number=quote_number,
                     address=data.get("address", ""),
                     approval_url=approval_url,
                 )
-                email_status = f"Updated approval link emailed to {agent_email}"
+                email_status = f"Updated approval link emailed to {', '.join(to_emails)}"
             except Exception as email_err:
                 print(f"Email send failed: {email_err}")
                 email_status = f"Email failed — send manually"
@@ -534,7 +640,7 @@ def handle_message(chat_id: str, text: str, reply_to_id: int | None = None) -> s
         if confirmed is True:
             session["stage"] = "GET_AGENT"
             _save_session(chat_id, session)
-            return "What's the RE agency name?"
+            return "What's the RE agency name? _(or reply \"customer\" if this is a direct customer)_"
         if confirmed is False:
             _clear_session(chat_id)
             return "Quote cancelled. Send /new to start again."
@@ -543,6 +649,14 @@ def handle_message(chat_id: str, text: str, reply_to_id: int | None = None) -> s
 
     # ── GET_AGENT ──────────────────────────────────────────────────────────────
     if stage == "GET_AGENT":
+        if text.strip().lower() in ("customer", "direct customer", "direct"):
+            session["stage"] = "GET_CUSTOMER_DETAILS"
+            _save_session(chat_id, session)
+            return (
+                "Please provide the customer's name, mobile and email — e.g.\n"
+                "_John Smith, 0412 345 678, john@gmail.com_"
+            )
+
         from tools.zoho_lookup_contact import lookup_contact
         matches = lookup_contact(text)
         if matches:
@@ -579,6 +693,68 @@ def handle_message(chat_id: str, text: str, reply_to_id: int | None = None) -> s
         session["data"] = data
         _save_session(chat_id, session)
         return f"Account created for *{account['Account_Name']}*.\n" + _do_create_quote(chat_id, session)
+
+    # ── GET_CUSTOMER_DETAILS — direct customer, not going through an agency form ─
+    if stage == "GET_CUSTOMER_DETAILS":
+        details = _extract_agent_details(text)
+        if not details or not details.get("name"):
+            return "Please provide the customer's name, mobile and email — e.g. _John Smith, 0412 345 678, john@gmail.com_"
+        data["customer_name"] = details["name"]
+        data["customer_email"] = details.get("email") or ""
+        data["customer_mobile"] = details.get("mobile") or ""
+        session["stage"] = "ASK_AGENCY_LINK"
+        _save_session(chat_id, session)
+        return (
+            f"Got it: *{data['customer_name']}*.\n\n"
+            f"Is this linked to an existing RE agency? Reply with the agency name, or say *no*."
+        )
+
+    # ── ASK_AGENCY_LINK — is the direct customer sourced from an agency? ────────
+    if stage == "ASK_AGENCY_LINK":
+        if text.strip().lower() in ("no", "none", "n/a", "na", "nope", "nah"):
+            data["account_id"] = ""
+            data["agent_name"] = ""
+            data["agent_email"] = ""
+            session["data"] = data
+            _save_session(chat_id, session)
+            return _do_create_customer_quote(chat_id, session)
+
+        from tools.zoho_lookup_contact import lookup_contact
+        matches = lookup_contact(text)
+        if matches:
+            account = matches[0]
+            data["account_id"] = account["id"]
+            data["agent_name"] = account["Full_Name"]
+            data["agent_email"] = account.get("Email", "")
+            session["data"] = data
+            _save_session(chat_id, session)
+            return (
+                f"Linked to *{account['Full_Name']}*.\n"
+                + _do_create_customer_quote(chat_id, session)
+            )
+        else:
+            data["agency_query"] = text
+            session["stage"] = "GET_AGENCY_DETAILS_FOR_CUSTOMER"
+            _save_session(chat_id, session)
+            return (
+                f"*{text}* not found in Zoho.\n"
+                f"Please provide their name, mobile and email — e.g.\n"
+                f"_Jane Smith, 0412 345 678, jane@raywhite.com_"
+            )
+
+    # ── GET_AGENCY_DETAILS_FOR_CUSTOMER — new Account for a direct customer's agency
+    if stage == "GET_AGENCY_DETAILS_FOR_CUSTOMER":
+        from tools.zoho_create_account import create_account
+        details = _extract_agent_details(text)
+        if not details or not details.get("name"):
+            return "Please provide their name, mobile and email — e.g. _Jane Smith, 0412 345 678, jane@raywhite.com_"
+        account = create_account(details["name"], details.get("mobile", ""), details.get("email", ""))
+        data["account_id"] = account["id"]
+        data["agent_name"] = account["Account_Name"]
+        data["agent_email"] = details.get("email") or ""
+        session["data"] = data
+        _save_session(chat_id, session)
+        return f"Agency account created for *{account['Account_Name']}*.\n" + _do_create_customer_quote(chat_id, session)
 
     # ── EDIT_AMOUNT — renegotiated price on an already-sent quote ───────────────
     if stage == "EDIT_AMOUNT":

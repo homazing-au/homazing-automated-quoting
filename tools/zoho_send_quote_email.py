@@ -10,7 +10,7 @@ ADMIN_EMAIL = "admin@homazing.com.au"
 
 def send_quote_email(
     estimate_id: str,
-    to_email: str,
+    to_emails: list[str],
     agent_name: str,
     quote_number: str,
     address: str,
@@ -49,14 +49,17 @@ def send_quote_email(
 </body>
 </html>"""
 
+    to_emails = list(dict.fromkeys(e for e in to_emails if e))  # dedupe, preserve order
+
     payload = {
         "from":    {"email": from_email, "name": "Homazing"},
-        "to":      [{"email": to_email, "name": agent_name}],
-        "cc":      [{"email": ADMIN_EMAIL}],
+        "to":      [{"email": e} for e in to_emails],
         "subject": f"Homazing Quote - {address}",
         "text":    plain,
         "html":    html,
     }
+    if ADMIN_EMAIL not in to_emails:
+        payload["bcc"] = [{"email": ADMIN_EMAIL}]
 
     resp = requests.post(
         "https://api.mailersend.com/v1/email",

@@ -281,7 +281,7 @@ def _render_page(token: str, quote: dict) -> str:
     </div>
     <div class="header-meta-item">
       <p class="header-meta-label">Agent</p>
-      <p class="header-meta-value">{quote['ag']}</p>
+      <p class="header-meta-value">{quote.get('ag') or quote.get('cu', '')}</p>
     </div>
     <div class="header-meta-item">
       <p class="header-meta-label">Minimum Hire Period</p>
@@ -565,10 +565,11 @@ def approval_submit(token: str):
         from tools.zoho_create_invoice     import create_invoice
         from tools.zoho_send_invoice_email import send_invoice_email
 
+        agent_email = quote.get("ae", "")
+        agent_name  = quote.get("ag", "Homazing Agent")
+
         if contact_type == "realtor":
             # No contact created — invoice goes straight to the agency account
-            agent_email = quote.get("ae", "")
-            agent_name  = quote.get("ag", "Homazing Agent")
             invoice = create_invoice(
                 contact_id = None,
                 pricing    = quote["pr"],
@@ -577,7 +578,7 @@ def approval_submit(token: str):
             )
             try:
                 send_invoice_email(
-                    to_email       = agent_email,
+                    to_emails      = [agent_email],
                     contact_name   = agent_name,
                     invoice_number = invoice["invoice_number"],
                     address        = quote.get("addr", ""),
@@ -587,7 +588,7 @@ def approval_submit(token: str):
             except Exception as email_err:
                 print(f"Invoice email (realtor) failed: {email_err}")
         else:
-            # Home owner — create contact and send to them
+            # Home owner — create contact and send to them + the linked agency, if any
             contact = create_contact(name, email, mobile, account_id=quote.get("aid", ""))
             invoice = create_invoice(
                 contact_id = contact["id"],
@@ -597,7 +598,7 @@ def approval_submit(token: str):
             )
             try:
                 send_invoice_email(
-                    to_email       = email,
+                    to_emails      = [email, agent_email],
                     contact_name   = name,
                     invoice_number = invoice["invoice_number"],
                     address        = quote.get("addr", ""),

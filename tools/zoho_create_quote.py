@@ -9,12 +9,15 @@ CRM_BASE   = "https://www.zohoapis.com.au/crm/v2"
 PRODUCT_ID = os.getenv("ZOHO_PRODUCT_ID", "124143000000580001")
 
 
-def create_quote(account_id: str, pricing: dict, address: str = "") -> dict:
+def create_quote(account_id: str, pricing: dict, address: str = "", contact_id: str = "") -> dict:
     """
     Args:
-        account_id: Zoho CRM Account ID (RE agency)
+        account_id: Zoho CRM Account ID (RE agency). Optional — omit for a direct
+                    customer with no linked agency.
         pricing:    output from calculate_price()
         address:    property address used in the quote Subject
+        contact_id: Zoho CRM Contact ID (customer), if this quote is for a
+                    specific person rather than just the agency.
     Returns:
         dict with quote id and quote_number
     """
@@ -31,10 +34,9 @@ def create_quote(account_id: str, pricing: dict, address: str = "") -> dict:
     subject     = address if address else "Property Styling Quote"
     expiry_date = (date.today() + timedelta(days=7)).strftime("%Y-%m-%d")
 
-    payload = {"data": [{
+    quote_record = {
         "Subject":              subject,
         "Quote_Stage":          "Draft",
-        "Account_Name":         {"id": account_id},
         "Expiry_Date":          expiry_date,
         "Terms_and_Conditions": "Valid for 7 days. Prices include GST.",
         "Product_Details": [{
@@ -42,7 +44,13 @@ def create_quote(account_id: str, pricing: dict, address: str = "") -> dict:
             "quantity": 1.0,
             "discount": 0.0,
         }],
-    }]}
+    }
+    if account_id:
+        quote_record["Account_Name"] = {"id": account_id}
+    if contact_id:
+        quote_record["Contact_Name"] = {"id": contact_id}
+
+    payload = {"data": [quote_record]}
 
     resp = requests.post(f"{CRM_BASE}/Quotes", headers=headers, json=payload)
     if not resp.ok:
@@ -64,13 +72,18 @@ def create_quote(account_id: str, pricing: dict, address: str = "") -> dict:
     quote_number = get_resp.json()["data"][0].get("Quote_Number", quote_id)
 
     # Create a linked Deal to track the quote through the sales pipeline
-    deal_payload = {"data": [{
+    deal_record = {
         "Deal_Name":    subject,
         "Stage":        "Quote Awaiting Approval",
-        "Account_Name": {"id": account_id},
         "Closing_Date": expiry_date,
         "Amount":       pricing["total_inc_gst"],
-    }]}
+    }
+    if account_id:
+        deal_record["Account_Name"] = {"id": account_id}
+    if contact_id:
+        deal_record["Contact_Name"] = {"id": contact_id}
+
+    deal_payload = {"data": [deal_record]}
     deal_resp = requests.post(f"{CRM_BASE}/Deals", headers=headers, json=deal_payload)
     if not deal_resp.ok:
         raise RuntimeError(f"{deal_resp.status_code} {deal_resp.reason} — {deal_resp.text}")
