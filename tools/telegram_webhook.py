@@ -25,7 +25,16 @@ def get_updates(offset: int) -> list:
 
 def send(text: str, chat_id: str = CHAT_ID) -> int | None:
     resp = requests.post(f"{BASE}/sendMessage", json={"chat_id": chat_id, "text": text, "parse_mode": "Markdown"})
-    return resp.json().get("result", {}).get("message_id")
+    data = resp.json()
+    if not data.get("ok"):
+        # Markdown parse failure (e.g. an email/name with an unpaired _ or *) would
+        # otherwise drop the message silently — retry as plain text so it still lands.
+        print(f"Telegram send with Markdown failed: {data}. Retrying as plain text.")
+        resp = requests.post(f"{BASE}/sendMessage", json={"chat_id": chat_id, "text": text})
+        data = resp.json()
+        if not data.get("ok"):
+            print(f"Telegram send failed even as plain text: {data}")
+    return data.get("result", {}).get("message_id")
 
 
 def send_typing(chat_id: str) -> None:
