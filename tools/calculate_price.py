@@ -30,7 +30,7 @@ ROOM_LABELS = {
     "bath":           "Bath",
     "hallway_table":  "Hallway Table",
     "study":          "Study",
-    "small_living":   "Small Living",
+    "small_living":   "Extended Living",
 }
 
 
