@@ -57,3 +57,41 @@ def update_quote_amount(quote_id: str, deal_id: str, pricing: dict) -> None:
         deal_result = deal_resp.json()["data"][0]
         if deal_result.get("status") == "error":
             raise RuntimeError(f"CRM error (Deal update): {deal_result.get('message')} — {deal_result.get('details')}")
+
+
+def mark_quote_approved(quote_id: str, deal_id: str, contact_id: str = "") -> None:
+    """Called when the customer/agent approves the quote on the web page.
+    Moves the Quote to 'Confirmed' and the Deal to 'Quote Approved' — does NOT
+    raise an invoice. Invoicing is a separate, manually-triggered step via the
+    Telegram bot's 'send invoice' command, so jobs aren't invoiced before the
+    work is actually scheduled/done.
+    """
+    token   = get_access_token()
+    headers = {"Authorization": f"Zoho-oauthtoken {token}"}
+
+    if quote_id:
+        resp = requests.put(
+            f"{CRM_BASE}/Quotes",
+            headers=headers,
+            json={"data": [{"id": quote_id, "Quote_Stage": "Confirmed"}]},
+        )
+        resp.raise_for_status()
+
+    if deal_id:
+        deal_record = {"id": deal_id, "Stage": "Quote Approved"}
+        if contact_id:
+            deal_record["Contact_Name"] = {"id": contact_id}
+        resp2 = requests.put(f"{CRM_BASE}/Deals", headers=headers, json={"data": [deal_record]})
+        resp2.raise_for_status()
+
+
+def mark_deal_invoiced(deal_id: str) -> None:
+    """Called after an invoice has actually been created and sent for a Deal."""
+    token   = get_access_token()
+    headers = {"Authorization": f"Zoho-oauthtoken {token}"}
+    resp = requests.put(
+        f"{CRM_BASE}/Deals",
+        headers=headers,
+        json={"data": [{"id": deal_id, "Stage": "Invoiced"}]},
+    )
+    resp.raise_for_status()

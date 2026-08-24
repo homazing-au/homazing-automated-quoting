@@ -480,6 +480,70 @@ def _do_resend_quote(chat_id: str, session: dict, new_pricing: dict) -> str:
         return f"Quote update failed: {e}"
 
 
+def _start_send_invoice(chat_id: str) -> str:
+    from tools.zoho_list_approved_deals import list_approved_deals
+    deals = list_approved_deals()
+    if not deals:
+        return "No approved quotes are waiting to be invoiced."
+
+    session = {"stage": "SEND_INVOICE_PICK", "data": {"invoice_candidates": deals}}
+    _save_session(chat_id, session)
+    lines = [
+        f"{i + 1}. {d['address']} — {d['contact_name'] or d['account_name'] or 'Unknown'} — ${d['amount']:,.0f}"
+        for i, d in enumerate(deals)
+    ]
+    return "Which job do you want to invoice? Reply with the number:\n\n" + "\n".join(lines)
+
+
+def _do_send_invoice(deal: dict) -> str:
+    from tools.zoho_create_invoice import create_invoice
+    from tools.zoho_send_invoice_email import send_invoice_email
+    from tools.zoho_update_quote import mark_deal_invoiced
+    from tools.zoho_get_email import get_email
+    try:
+        total = deal["amount"]
+        gst = round(total / 11, 2)
+        pricing = {
+            "subtotal_ex_gst": round(total - gst, 2),
+            "gst":             gst,
+            "total_inc_gst":   total,
+        }
+
+        invoice = create_invoice(
+            contact_id=deal.get("contact_id") or None,
+            pricing=pricing,
+            address=deal["address"],
+            account_id=deal.get("account_id", ""),
+        )
+
+        customer_email = get_email("Contacts", deal.get("contact_id", ""))
+        agent_email    = get_email("Accounts", deal.get("account_id", ""))
+        to_emails = list(dict.fromkeys(e for e in (customer_email, agent_email) if e))
+
+        if to_emails:
+            send_invoice_email(
+                to_emails=to_emails,
+                contact_name=deal.get("contact_name") or deal.get("account_name") or "Customer",
+                invoice_number=invoice["invoice_number"],
+                address=deal["address"],
+                total_inc_gst=total,
+                pricing=pricing,
+            )
+            email_status = f"Invoice emailed to {', '.join(to_emails)}"
+        else:
+            email_status = "No email on file — send manually"
+
+        mark_deal_invoiced(deal["id"])
+
+        return (
+            f"Invoice *{invoice['invoice_number']}* created for {deal['address']}\n"
+            f"Total: ${total:,.0f} inc GST\n\n"
+            f"{email_status}"
+        )
+    except Exception as e:
+        return f"Invoice creation failed: {e}"
+
+
 def handle_message(chat_id: str, text: str, reply_to_id: int | None = None) -> str:
     text = text.strip()
 
@@ -488,6 +552,9 @@ def handle_message(chat_id: str, text: str, reply_to_id: int | None = None) -> s
         session = {"stage": "GET_ADDRESS", "data": {}}
         _save_session(chat_id, session)
         return "New quote started.\n\nWhat's the *property address*?"
+
+    if text.lower() in ("/invoice", "send invoice", "invoice"):
+        return _start_send_invoice(chat_id)
 
     edit_match = re.match(r'^/?edit\s+(\S+)', text, re.IGNORECASE)
     if edit_match:
@@ -755,6 +822,19 @@ def handle_message(chat_id: str, text: str, reply_to_id: int | None = None) -> s
         session["data"] = data
         _save_session(chat_id, session)
         return f"Agency account created for *{account['Account_Name']}*.\n" + _do_create_customer_quote(chat_id, session)
+
+    # ── SEND_INVOICE_PICK — pick which approved job to invoice ──────────────────
+    if stage == "SEND_INVOICE_PICK":
+        candidates = data.get("invoice_candidates", [])
+        m = re.match(r'^\s*(\d+)\s*$', text)
+        if not m:
+            return "Please reply with just the number of the job to invoice."
+        idx = int(m.group(1)) - 1
+        if idx < 0 or idx >= len(candidates):
+            return f"Please reply with a number between 1 and {len(candidates)}."
+        deal = candidates[idx]
+        _clear_session(chat_id)
+        return _do_send_invoice(deal)
 
     # ── EDIT_AMOUNT — renegotiated price on an already-sent quote ───────────────
     if stage == "EDIT_AMOUNT":

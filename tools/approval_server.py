@@ -422,8 +422,7 @@ def _render_page(token: str, quote: dict) -> str:
     <div class="confirmation approved" id="confirm-approved">
       <div class="confirmation-icon">&#10003;</div>
       <h3>Quote Approved</h3>
-      <p>Thank you! Your invoice has been created and will be sent to you shortly.</p>
-      <p class="invoice-ref" id="invoice-ref"></p>
+      <p>Thank you! Your booking is confirmed. We'll send your invoice closer to the job date.</p>
     </div>
 
     <div class="confirmation declined" id="confirm-declined">
@@ -486,8 +485,6 @@ def _render_page(token: str, quote: dict) -> str:
 
       if (res.ok) {{
         document.getElementById('approval-form').style.display = 'none';
-        document.getElementById('invoice-ref').innerHTML =
-          'Invoice ' + data.invoice_number + '<br>Total $' + {total_str} + ' (inc. GST)';
         document.getElementById('confirm-approved').style.display = 'block';
         document.getElementById('confirm-approved').scrollIntoView({{behavior: 'smooth', block: 'center'}});
       }} else {{
@@ -561,54 +558,23 @@ def approval_submit(token: str):
         return jsonify({"error": "Name, email and mobile are required."}), 400
 
     try:
-        from tools.zoho_create_contact     import create_contact
-        from tools.zoho_create_invoice     import create_invoice
-        from tools.zoho_send_invoice_email import send_invoice_email
+        from tools.zoho_create_contact import create_contact
+        from tools.zoho_update_quote   import mark_quote_approved
 
-        agent_email = quote.get("ae", "")
-        agent_name  = quote.get("ag", "Homazing Agent")
+        quote_id = quote.get("qi", "")
+        deal_id  = quote.get("did", "")
 
         if contact_type == "realtor":
-            # No contact created — invoice goes straight to the agency account
-            invoice = create_invoice(
-                contact_id = None,
-                pricing    = quote["pr"],
-                address    = quote.get("addr", ""),
-                account_id = quote.get("aid", ""),
-            )
-            try:
-                send_invoice_email(
-                    to_emails      = [agent_email],
-                    contact_name   = agent_name,
-                    invoice_number = invoice["invoice_number"],
-                    address        = quote.get("addr", ""),
-                    total_inc_gst  = quote["pr"]["total_inc_gst"],
-                    pricing        = quote["pr"],
-                )
-            except Exception as email_err:
-                print(f"Invoice email (realtor) failed: {email_err}")
+            # No new contact — quote was already linked to the agency account
+            mark_quote_approved(quote_id, deal_id)
         else:
-            # Home owner — create contact and send to them + the linked agency, if any
+            # Home owner — create/link their contact so it's ready for invoicing later
             contact = create_contact(name, email, mobile, account_id=quote.get("aid", ""))
-            invoice = create_invoice(
-                contact_id = contact["id"],
-                pricing    = quote["pr"],
-                address    = quote.get("addr", ""),
-                account_id = quote.get("aid", ""),
-            )
-            try:
-                send_invoice_email(
-                    to_emails      = [email, agent_email],
-                    contact_name   = name,
-                    invoice_number = invoice["invoice_number"],
-                    address        = quote.get("addr", ""),
-                    total_inc_gst  = quote["pr"]["total_inc_gst"],
-                    pricing        = quote["pr"],
-                )
-            except Exception as email_err:
-                print(f"Invoice email (homeowner) failed: {email_err}")
+            mark_quote_approved(quote_id, deal_id, contact_id=contact["id"])
 
-        return jsonify({"invoice_number": invoice["invoice_number"]})
+        # Invoicing happens later via the Telegram bot's "send invoice" command —
+        # not here — so jobs aren't invoiced before the work is actually scheduled/done.
+        return jsonify({"status": "approved"})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
