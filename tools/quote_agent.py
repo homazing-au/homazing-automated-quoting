@@ -280,6 +280,8 @@ def _do_create_quote(chat_id: str, session: dict) -> str:
         email_status = ""
         if agent_email:
             try:
+                from tools.zoho_get_email import get_field
+                assistant_email = get_field("Accounts", data.get("account_id", ""), "Assistant_Email")
                 send_quote_email(
                     estimate_id=quote["id"],
                     to_emails=[agent_email],
@@ -287,6 +289,7 @@ def _do_create_quote(chat_id: str, session: dict) -> str:
                     quote_number=quote["quote_number"],
                     address=data.get("address", ""),
                     approval_url=approval_url,
+                    cc_emails=[assistant_email] if assistant_email else None,
                 )
                 email_status = f"Approval link emailed to {agent_email}"
             except Exception as email_err:
@@ -364,6 +367,8 @@ def _do_create_customer_quote(chat_id: str, session: dict) -> str:
         email_status = ""
         if to_emails:
             try:
+                from tools.zoho_get_email import get_field
+                assistant_email = get_field("Accounts", account_id, "Assistant_Email")
                 send_quote_email(
                     estimate_id=quote["id"],
                     to_emails=to_emails,
@@ -371,6 +376,7 @@ def _do_create_customer_quote(chat_id: str, session: dict) -> str:
                     quote_number=quote["quote_number"],
                     address=data.get("address", ""),
                     approval_url=approval_url,
+                    cc_emails=[assistant_email] if assistant_email else None,
                 )
                 email_status = f"Approval link emailed to {', '.join(to_emails)}"
             except Exception as email_err:
@@ -455,6 +461,8 @@ def _do_resend_quote(chat_id: str, session: dict, new_pricing: dict) -> str:
         email_status = ""
         if to_emails:
             try:
+                from tools.zoho_get_email import get_field
+                assistant_email = get_field("Accounts", data.get("account_id", ""), "Assistant_Email")
                 send_quote_email(
                     estimate_id=data["quote_id"],
                     to_emails=to_emails,
@@ -462,6 +470,7 @@ def _do_resend_quote(chat_id: str, session: dict, new_pricing: dict) -> str:
                     quote_number=quote_number,
                     address=data.get("address", ""),
                     approval_url=approval_url,
+                    cc_emails=[assistant_email] if assistant_email else None,
                 )
                 email_status = f"Updated approval link emailed to {', '.join(to_emails)}"
             except Exception as email_err:

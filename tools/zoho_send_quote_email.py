@@ -15,6 +15,7 @@ def send_quote_email(
     quote_number: str,
     address: str,
     approval_url: str,
+    cc_emails: list[str] | None = None,
 ) -> None:
     api_key  = os.getenv("MAILERSEND_API_KEY")
     from_email = os.getenv("FROM_EMAIL", "admin@homazing.com.au")
@@ -50,6 +51,7 @@ def send_quote_email(
 </html>"""
 
     to_emails = list(dict.fromkeys(e for e in to_emails if e))  # dedupe, preserve order
+    cc_emails = list(dict.fromkeys(e for e in (cc_emails or []) if e and e not in to_emails))
 
     payload = {
         "from":    {"email": from_email, "name": "Homazing"},
@@ -58,7 +60,9 @@ def send_quote_email(
         "text":    plain,
         "html":    html,
     }
-    if ADMIN_EMAIL not in to_emails:
+    if cc_emails:
+        payload["cc"] = [{"email": e} for e in cc_emails]
+    if ADMIN_EMAIL not in to_emails and ADMIN_EMAIL not in cc_emails:
         payload["bcc"] = [{"email": ADMIN_EMAIL}]
 
     resp = requests.post(
