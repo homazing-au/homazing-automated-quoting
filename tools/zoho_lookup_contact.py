@@ -20,10 +20,11 @@ def lookup_contact(name: str) -> list[dict]:
     search_lower = name.lower()
     return [
         {
-            "id":        a.get("id"),
-            "Full_Name": a.get("Account_Name", ""),
-            "Email":     a.get("Email", ""),
-            "Mobile":    a.get("Phone", ""),
+            "id":           a.get("id"),
+            "Full_Name":    a.get("Account_Name", ""),
+            "Email":        a.get("Email", ""),
+            "Mobile":       a.get("Phone", ""),
+            "Account_Site": a.get("Account_Site", ""),
         }
         for a in resp.json().get("data", [])
         if search_lower in a.get("Account_Name", "").lower()

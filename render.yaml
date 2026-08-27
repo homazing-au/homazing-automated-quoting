@@ -27,3 +27,9 @@ services:
         sync: false
       - key: APPROVAL_BASE_URL
         sync: false
+      - key: GOOGLE_SHEET_ID
+        value: 1rSiOd_kTw2A8ynDnAcc9QvoUFQal3OidtcQ_RZRwu40
+      - key: GOOGLE_SHEET_TAB
+        value: Staging Jobs
+      - key: GOOGLE_TOKEN_JSON
+        sync: false

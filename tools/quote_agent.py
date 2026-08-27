@@ -292,6 +292,17 @@ def _do_create_quote(chat_id: str, session: dict) -> str:
                     cc_emails=[assistant_email] if assistant_email else None,
                 )
                 email_status = f"Approval link emailed to {agent_email}"
+                try:
+                    from tools.google_sheets import append_staging_job
+                    append_staging_job(
+                        address=data.get("address", ""),
+                        agency=data.get("account_site") or data.get("agent_name", ""),
+                        agent_name=data.get("agent_name", ""),
+                        gross=data["pricing"]["total_inc_gst"],
+                        has_referral=bool(data.get("referral_pct")),
+                    )
+                except Exception as sheet_err:
+                    print(f"Staging Jobs sheet append failed: {sheet_err}")
             except Exception as email_err:
                 print(f"Email send failed: {email_err}")
                 email_status = f"Email failed: {email_err}"
@@ -379,6 +390,17 @@ def _do_create_customer_quote(chat_id: str, session: dict) -> str:
                     cc_emails=[assistant_email] if assistant_email else None,
                 )
                 email_status = f"Approval link emailed to {', '.join(to_emails)}"
+                try:
+                    from tools.google_sheets import append_staging_job
+                    append_staging_job(
+                        address=data.get("address", ""),
+                        agency=data.get("account_site") or data.get("agent_name", ""),
+                        agent_name=data["customer_name"],
+                        gross=data["pricing"]["total_inc_gst"],
+                        has_referral=bool(data.get("referral_pct")),
+                    )
+                except Exception as sheet_err:
+                    print(f"Staging Jobs sheet append failed: {sheet_err}")
             except Exception as email_err:
                 print(f"Email send failed: {email_err}")
                 email_status = f"Email failed: {email_err}"
@@ -724,6 +746,7 @@ def handle_message(chat_id: str, text: str, reply_to_id: int | None = None) -> s
             data["account_id"] = account["id"]
             data["agent_name"] = account["Full_Name"]
             data["agent_email"] = account.get("Email", "")
+            data["account_site"] = account.get("Account_Site", "")
             session["data"] = data
             _save_session(chat_id, session)
             return (
@@ -786,6 +809,7 @@ def handle_message(chat_id: str, text: str, reply_to_id: int | None = None) -> s
             data["account_id"] = account["id"]
             data["agent_name"] = account["Full_Name"]
             data["agent_email"] = account.get("Email", "")
+            data["account_site"] = account.get("Account_Site", "")
             session["data"] = data
             _save_session(chat_id, session)
             return (
