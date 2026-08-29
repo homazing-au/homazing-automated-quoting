@@ -549,27 +549,128 @@ def _do_send_invoice(deal: dict) -> str:
         )
         qbo_status = "Synced to QuickBooks" if result.get("qbo_ok") else "QuickBooks sync failed — check Telegram alert"
 
+        invoice_number = result.get("invoice_number")
+        sheet_status = ""
+        if invoice_number:
+            try:
+                from tools.google_sheets import set_invoice_number
+                sheet_result = set_invoice_number(deal["address"], invoice_number)
+                if sheet_result.get("row") is None:
+                    sheet_status = f"\n(Sheet not updated: {sheet_result.get('reason')})"
+            except Exception as e:
+                sheet_status = f"\n(Sheet not updated: {e})"
+
         return (
             f"Invoice *{result.get('invoice_number', '?')}* created for {deal['address']}\n"
             f"Total: ${deal['amount']:,.0f} inc GST\n\n"
             f"{email_status}\n"
             f"{qbo_status}"
+            f"{sheet_status}"
         )
     except Exception as e:
         return f"Invoice creation failed: {e}"
+
+
+_WORD_NUMBERS = {
+    "one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
+    "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10,
+}
+
+
+def _extract_numbers(text: str) -> list[int]:
+    """Pull list-item numbers out of free text, digits or spelled out -
+    'referral paid for number one' and 'referral paid for 2,4' both work."""
+    lowered = text.lower()
+    found = [(m.start(), int(m.group())) for m in re.finditer(r"\d+", lowered)]
+    for word, val in _WORD_NUMBERS.items():
+        for m in re.finditer(rf"\b{word}\b", lowered):
+            found.append((m.start(), val))
+    found.sort(key=lambda x: x[0])
+    return [n for _, n in found]
+
+
+def _start_staging_complete(chat_id: str) -> str:
+    from tools.sheet_actions import list_staging_complete_candidates
+    candidates = list_staging_complete_candidates()
+    if not candidates:
+        return "No jobs waiting to be marked as staged today."
+    session = {"stage": "STAGING_COMPLETE_PICK", "data": {"candidates": candidates}}
+    _save_session(chat_id, session)
+    lines = [f"{i + 1}. {c['address']}" for i, c in enumerate(candidates)]
+    return "Which address(es) were staged today? Reply with the number(s), e.g. *2* or *2,4*:\n\n" + "\n".join(lines)
+
+
+def _start_staging_removed(chat_id: str) -> str:
+    from tools.sheet_actions import list_staging_removed_candidates
+    candidates = list_staging_removed_candidates()
+    if not candidates:
+        return "No currently-staged jobs waiting to be marked as removed."
+    session = {"stage": "STAGING_REMOVED_PICK", "data": {"candidates": candidates}}
+    _save_session(chat_id, session)
+    lines = [f"{i + 1}. {c['address']}" for i, c in enumerate(candidates)]
+    return "Which address(es) had staging removed today? Reply with the number(s), e.g. *2* or *2,4*:\n\n" + "\n".join(lines)
+
+
+def _start_referral_list(chat_id: str) -> str:
+    from tools.sheet_actions import list_referral_candidates
+    candidates = list_referral_candidates()
+    if not candidates:
+        return "No outstanding referrals to pay."
+    session = {"stage": "REFERRAL_ACTIVE", "data": {"candidates": candidates, "last_asked": None}}
+    _save_session(chat_id, session)
+    lines = [f"{i + 1}. {c['address']} - {c['amount_display']}" for i, c in enumerate(candidates)]
+    return (
+        "Outstanding referrals:\n\n" + "\n".join(lines) +
+        "\n\nSay *how much for 2*, *referral paid for 2*, or just *paid* after asking how much."
+    )
+
+
+def _start_new_quote(chat_id: str) -> str:
+    _clear_session(chat_id)
+    _save_session(chat_id, {"stage": "GET_ADDRESS", "data": {}})
+    return "New quote started.\n\nWhat's the *property address*?"
+
+
+# Numbered menu shown on a greeting/help message, in display order.
+# Each entry: (label, function(chat_id) -> reply text that starts that flow).
+MENU_ITEMS = [
+    ("New quote", _start_new_quote),
+    ("Send invoice", _start_send_invoice),
+    ("Staging complete", _start_staging_complete),
+    ("Staging removed", _start_staging_removed),
+    ("Referral", _start_referral_list),
+]
+
+
+def _start_help_menu(chat_id: str) -> str:
+    session = {"stage": "HELP_MENU_PICK", "data": {}}
+    _save_session(chat_id, session)
+    lines = [f"{i + 1}. {label}" for i, (label, _) in enumerate(MENU_ITEMS)]
+    return "What do you want to do?\n\n" + "\n".join(lines) + "\n\nReply with a number."
 
 
 def handle_message(chat_id: str, text: str, reply_to_id: int | None = None) -> str:
     text = text.strip()
 
     if text.lower() in ("/start", "/new", "/reset"):
-        _clear_session(chat_id)
-        session = {"stage": "GET_ADDRESS", "data": {}}
-        _save_session(chat_id, session)
-        return "New quote started.\n\nWhat's the *property address*?"
+        return _start_new_quote(chat_id)
 
     if text.lower() in ("/invoice", "send invoice", "invoice"):
         return _start_send_invoice(chat_id)
+
+    normalized = text.lower().lstrip("/").replace("_", " ").strip()
+
+    if normalized == "staging complete":
+        return _start_staging_complete(chat_id)
+
+    if normalized == "staging removed":
+        return _start_staging_removed(chat_id)
+
+    if normalized in ("referral", "referrals", "referral list", "list referrals"):
+        return _start_referral_list(chat_id)
+
+    if normalized in ("hi", "hello", "hey", "help", "menu", "commands", "what can you do"):
+        return _start_help_menu(chat_id)
 
     edit_match = re.match(r'^/?edit\s+(\S+)', text, re.IGNORECASE)
     if edit_match:
@@ -852,6 +953,98 @@ def handle_message(chat_id: str, text: str, reply_to_id: int | None = None) -> s
         deal = candidates[idx]
         _clear_session(chat_id)
         return _do_send_invoice(deal)
+
+    # ── HELP_MENU_PICK — numbered menu from "hi"/"help" ──────────────────────────
+    if stage == "HELP_MENU_PICK":
+        nums = _extract_numbers(text)
+        if not nums:
+            return "Please reply with just the number of what you want to do."
+        idx = nums[0] - 1
+        if idx < 0 or idx >= len(MENU_ITEMS):
+            return f"Please reply with a number between 1 and {len(MENU_ITEMS)}."
+        _, start_fn = MENU_ITEMS[idx]
+        return start_fn(chat_id)
+
+    # ── STAGING_COMPLETE_PICK — mark today as the Staged Date ───────────────────
+    if stage == "STAGING_COMPLETE_PICK":
+        from tools.sheet_actions import mark_staged
+        candidates = data.get("candidates", [])
+        nums = _extract_numbers(text)
+        if not nums:
+            return "Please reply with the number(s) of the address(es), e.g. *2* or *2,4*."
+        indices = [int(n) - 1 for n in nums]
+        if any(i < 0 or i >= len(candidates) for i in indices):
+            return f"Please reply with number(s) between 1 and {len(candidates)}."
+        done = []
+        for i in indices:
+            c = candidates[i]
+            mark_staged(c["row"])
+            done.append(c["address"])
+        _clear_session(chat_id)
+        return "Marked as staged today:\n" + "\n".join(f"• {a}" for a in done)
+
+    # ── STAGING_REMOVED_PICK — mark today as the Staging Removed Date ───────────
+    if stage == "STAGING_REMOVED_PICK":
+        from tools.sheet_actions import mark_staging_removed
+        candidates = data.get("candidates", [])
+        nums = _extract_numbers(text)
+        if not nums:
+            return "Please reply with the number(s) of the address(es), e.g. *2* or *2,4*."
+        indices = [int(n) - 1 for n in nums]
+        if any(i < 0 or i >= len(candidates) for i in indices):
+            return f"Please reply with number(s) between 1 and {len(candidates)}."
+        done = []
+        for i in indices:
+            c = candidates[i]
+            mark_staging_removed(c["row"])
+            done.append(c["address"])
+        _clear_session(chat_id)
+        return "Marked staging removed today:\n" + "\n".join(f"• {a}" for a in done)
+
+    # ── REFERRAL_ACTIVE — "how much for N" / "referral paid for N" / bare "paid" ─
+    if stage == "REFERRAL_ACTIVE":
+        from tools.sheet_actions import mark_referral_paid, get_referral_amount_display
+        candidates = data.get("candidates", [])
+        lowered = text.lower().strip()
+
+        def _candidate_from_text(t):
+            nums = _extract_numbers(t)
+            if not nums:
+                return None
+            idx = nums[0] - 1
+            if idx < 0 or idx >= len(candidates):
+                return None
+            return candidates[idx]
+
+        if lowered in ("paid", "yes paid", "mark paid"):
+            last_idx = data.get("last_asked")
+            if last_idx is None:
+                return "Paid for which one? Ask *how much for N* first, or say *referral paid for N*."
+            c = candidates[last_idx]
+            mark_referral_paid(c["row"])
+            return f"Marked referral paid for {c['address']}."
+
+        if "how much" in lowered:
+            c = _candidate_from_text(lowered)
+            if not c:
+                return "How much for which number? e.g. *how much for 2*"
+            data["last_asked"] = candidates.index(c)
+            session["data"] = data
+            _save_session(chat_id, session)
+            amount = get_referral_amount_display(c["row"])
+            return f"Referral for {c['address']}: {amount}"
+
+        if "referral" in lowered and "paid" in lowered:
+            c = _candidate_from_text(lowered)
+            if not c:
+                return "Referral paid for which number? e.g. *referral paid for 2*"
+            mark_referral_paid(c["row"])
+            return f"Marked referral paid for {c['address']}."
+
+        return (
+            "Say *how much for N*, *referral paid for N*, or *paid* (after asking how much).\n"
+            "Send */referral* again to see the list."
+        )
 
     # ── EDIT_AMOUNT — renegotiated price on an already-sent quote ───────────────
     if stage == "EDIT_AMOUNT":

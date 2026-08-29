@@ -62,6 +62,13 @@ def _parse_suburb(address: str) -> str:
     return re.sub(rf"\s+{STATE_POSTCODE}\s*$", "", last, flags=re.IGNORECASE).strip()
 
 
+def _parse_street(address: str) -> str:
+    """Extract just the street number + name, e.g. '344 Huntingdale Rd' from
+    '344 Huntingdale Rd, Oakleigh South, VIC 3167' - matches the sheet's
+    existing convention of keeping Address (B) and Suburb (C) separate."""
+    return address.split(",", 1)[0].strip()
+
+
 def append_staging_job(address: str, agency: str, agent_name: str, gross: float, has_referral: bool) -> dict:
     """
     Append a new row for a newly-delivered quote. Fills A (job #), B (address),
@@ -88,10 +95,11 @@ def append_staging_job(address: str, agency: str, agent_name: str, gross: float,
     new_row_num = last_row_idx + 1
     new_job_no = last_job_no + 1
     suburb = _parse_suburb(address)
+    street = _parse_street(address)
 
     values = {
         "A": new_job_no,
-        "B": address,
+        "B": street,
         "C": suburb,
         "D": agency,
         "E": agent_name,
@@ -113,3 +121,40 @@ def append_staging_job(address: str, agency: str, agent_name: str, gross: float,
     ).execute()
 
     return {"row": new_row_num, "job_no": new_job_no, "suburb": suburb}
+
+
+def set_invoice_number(address: str, invoice_number: str) -> dict:
+    """Write the QuickBooks invoice number into column AA of the row matching
+    `address` (exact match against column B), so the Sales Agent's weekly
+    QuickBooks payment check knows which invoice to look up.
+
+    Matches the *most recent* row with this exact address, in case the same
+    property was staged more than once. Returns {"row": n} on success, or
+    {"row": None, "reason": "..."} if no matching row was found - callers
+    should treat that as non-fatal (the invoice itself is unaffected).
+    """
+    creds = _get_credentials()
+    service = build("sheets", "v4", credentials=creds)
+
+    col_b = service.spreadsheets().values().get(
+        spreadsheetId=SHEET_ID,
+        range=f"'{TAB}'!B4:B2000",
+    ).execute().get("values", [])
+
+    target = address.strip().lower()
+    match_row = None
+    for i, row in enumerate(col_b):
+        if row and row[0].strip().lower() == target:
+            match_row = 4 + i  # keep scanning - later rows win (most recent job)
+
+    if match_row is None:
+        return {"row": None, "reason": f"no sheet row found for address '{address}'"}
+
+    service.spreadsheets().values().update(
+        spreadsheetId=SHEET_ID,
+        range=f"'{TAB}'!AA{match_row}",
+        valueInputOption="RAW",
+        body={"values": [[invoice_number]]},
+    ).execute()
+
+    return {"row": match_row}
