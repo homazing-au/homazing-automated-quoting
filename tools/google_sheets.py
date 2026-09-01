@@ -69,6 +69,18 @@ def _parse_street(address: str) -> str:
     return address.split(",", 1)[0].strip()
 
 
+def _normalize_address(address: str) -> str:
+    """Street-only, case/whitespace-insensitive form for matching an address
+    across systems - e.g. Zoho's full 'Deal_Name' ('11 Rhubarb Rd, Manor
+    Lakes, VIC 3024') against the sheet's street-only Address column ('11
+    Rhubarb Rd'). This is the single source of truth for address matching
+    anywhere in this project - other modules should import it rather than
+    re-implementing their own version (a duplicate in sheet_actions.py
+    caused every candidate list to silently come back empty until this was
+    consolidated)."""
+    return "".join(_parse_street(address).lower().split())
+
+
 def append_staging_job(address: str, agency: str, agent_name: str, gross: float, has_referral: bool) -> dict:
     """
     Append a new row for a newly-delivered quote. Fills A (job #), B (address),
@@ -142,10 +154,10 @@ def set_invoice_number(address: str, invoice_number: str) -> dict:
         range=f"'{TAB}'!B4:B2000",
     ).execute().get("values", [])
 
-    target = _parse_street(address).strip().lower()
+    target = _normalize_address(address)
     match_row = None
     for i, row in enumerate(col_b):
-        if row and row[0].strip().lower() == target:
+        if row and _normalize_address(row[0]) == target:
             match_row = 4 + i  # keep scanning - later rows win (most recent job)
 
     if match_row is None:

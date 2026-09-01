@@ -19,7 +19,7 @@ import datetime
 
 from googleapiclient.discovery import build
 
-from tools.google_sheets import _get_credentials
+from tools.google_sheets import _get_credentials, _normalize_address
 
 SHEET_ID = "1rSiOd_kTw2A8ynDnAcc9QvoUFQal3OidtcQ_RZRwu40"
 TAB = "Staging Jobs"
@@ -50,14 +50,6 @@ def _get_rows(range_end="AA200", render="UNFORMATTED_VALUE"):
 
 def _cell(row, idx):
     return row[idx] if idx < len(row) else None
-
-
-def _normalize_address(addr: str) -> str:
-    """Compare on street-only, e.g. Zoho's '11 Rhubarb Rd, Manor Lakes, VIC
-    3024' against the sheet's '11 Rhubarb Rd' (Address/Suburb are separate
-    columns there - same convention as google_sheets.py's _parse_street)."""
-    street = addr.split(",", 1)[0]
-    return "".join(street.lower().split())
 
 
 def list_staging_complete_candidates() -> list[dict]:
