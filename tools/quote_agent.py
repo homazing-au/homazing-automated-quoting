@@ -589,29 +589,45 @@ def _extract_numbers(text: str) -> list[int]:
     return [n for _, n in found]
 
 
+def _first_name(full_name: str) -> str:
+    return full_name.split()[0] if full_name and full_name.split() else "there"
+
+
 def _notify_staging_event(deal_id: str, address: str, event: str) -> None:
     """event: 'staged' or 'removed'. Texts agent, customer (if a Contact
     exists - it won't if the agent approved the quote on the customer's
-    behalf), and assistant (if the account has one on file). Best-effort:
-    no deal_id, no contact, or no mobile number just means that recipient
-    is silently skipped."""
+    behalf), and assistant (if the account has one on file) - the assistant
+    gets a shorter, purely factual version. Best-effort: no deal_id, no
+    contact, or no mobile number just means that recipient is silently
+    skipped."""
     if not deal_id:
         return
     from tools.zoho_get_deal_contacts import get_deal_sms_contacts
     from tools.twilio_sms import send_sms
     contacts = get_deal_sms_contacts(deal_id)
-    body = (
-        f"Hi, staging is complete at {address} - ready for photos!"
-        if event == "staged" else
-        f"Hi, staging has been removed from {address}."
-    )
     for role in ("agent", "customer", "assistant"):
         contact = contacts.get(role)
-        if contact and contact.get("mobile"):
-            send_sms(contact["mobile"], body)
+        if not (contact and contact.get("mobile")):
+            continue
+        first = _first_name(contact.get("name", ""))
+        if role == "assistant":
+            body = (
+                f"Hi {first}, the styling is complete at {address} and ready for photos. Thank you!"
+                if event == "staged" else
+                f"Hi {first}, the furniture styling has been removed from {address}. Thank you!"
+            )
+        else:
+            body = (
+                f"Hi {first}, the styling is complete at {address} and ready for photos. "
+                f"Thanks for choosing Homazing, wishing you all the best with the sale!"
+                if event == "staged" else
+                f"Hi {first}, congratulations on the sale! The furniture styling has been removed "
+                f"from {address}. Thanks again for choosing Homazing."
+            )
+        send_sms(contact["mobile"], body)
 
 
-def _notify_referral_paid(deal_id: str, address: str, amount_display: str) -> None:
+def _notify_referral_paid(deal_id: str, address: str) -> None:
     """Texts the agent only, once their referral is marked paid."""
     if not deal_id:
         return
@@ -619,7 +635,12 @@ def _notify_referral_paid(deal_id: str, address: str, amount_display: str) -> No
     from tools.twilio_sms import send_sms
     agent = get_deal_sms_contacts(deal_id).get("agent")
     if agent and agent.get("mobile"):
-        send_sms(agent["mobile"], f"Hi {agent['name']}, your referral of {amount_display} for {address} has been paid.")
+        first = _first_name(agent.get("name", ""))
+        send_sms(
+            agent["mobile"],
+            f"Hi {first}, your referral payment for {address} has been sent. "
+            f"Thanks so much for the business, we really appreciate it!",
+        )
 
 
 def _start_staging_complete(chat_id: str) -> str:
@@ -1057,7 +1078,7 @@ def handle_message(chat_id: str, text: str, reply_to_id: int | None = None) -> s
                 return "Paid for which one? Ask *how much for N* first, or say *referral paid for N*."
             c = candidates[last_idx]
             mark_referral_paid(c["row"], c.get("deal_id", ""))
-            _notify_referral_paid(c.get("deal_id", ""), c["address"], c.get("amount_display", ""))
+            _notify_referral_paid(c.get("deal_id", ""), c["address"])
             return f"Marked referral paid for {c['address']}."
 
         if "how much" in lowered:
@@ -1075,7 +1096,7 @@ def handle_message(chat_id: str, text: str, reply_to_id: int | None = None) -> s
             if not c:
                 return "Referral paid for which number? e.g. *referral paid for 2*"
             mark_referral_paid(c["row"], c.get("deal_id", ""))
-            _notify_referral_paid(c.get("deal_id", ""), c["address"], c.get("amount_display", ""))
+            _notify_referral_paid(c.get("deal_id", ""), c["address"])
             return f"Marked referral paid for {c['address']}."
 
         return (
