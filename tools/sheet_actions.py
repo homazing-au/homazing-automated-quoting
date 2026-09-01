@@ -52,6 +52,21 @@ def _cell(row, idx):
     return row[idx] if idx < len(row) else None
 
 
+def _zoho_deal_id_by_addr() -> dict:
+    """address (normalized) -> deal id, across every open/invoiced Zoho
+    stage. Best-effort lookup used to attach a deal_id to a sheet-sourced
+    candidate (for the Closed Won update, or an SMS contact lookup) -
+    never used to filter which candidates show up."""
+    from tools.zoho_list_invoiced_deals import list_invoiced_deals
+    from tools.zoho_list_staging_candidates import list_staging_candidates
+
+    by_addr = {}
+    for d in list_invoiced_deals() + list_staging_candidates():
+        if d.get("address"):
+            by_addr.setdefault(_normalize_address(d["address"]), d["id"])
+    return by_addr
+
+
 def list_staging_complete_candidates() -> list[dict]:
     """Jobs that could still need staging: any Zoho deal not yet Closed Won/
     Closed Lost (awaiting approval, approved, or invoiced - staging can
@@ -73,7 +88,7 @@ def list_staging_complete_candidates() -> list[dict]:
             if addr and _normalize_address(addr) == norm:
                 staged_date = _cell(row, 5)
                 if not staged_date:
-                    candidates.append({"row": i, "address": addr})
+                    candidates.append({"row": i, "address": addr, "deal_id": deal["id"]})
                 break
     return candidates
 
@@ -95,13 +110,17 @@ def list_staging_removed_candidates() -> list[dict]:
     Closed Won) even though the staging itself hadn't been picked up yet.
     The sheet, not Zoho's stage, is the source of truth for what's
     physically staged."""
+    zoho_by_addr = _zoho_deal_id_by_addr()
     candidates = []
     for i, row in enumerate(_get_rows(), start=4):
         addr = _cell(row, 1)
         staged_date = _cell(row, 5)
         removed_date = _cell(row, 9)
         if addr and staged_date and not removed_date:
-            candidates.append({"row": i, "address": addr})
+            candidates.append({
+                "row": i, "address": addr,
+                "deal_id": zoho_by_addr.get(_normalize_address(addr), ""),
+            })
     return candidates
 
 
@@ -122,13 +141,7 @@ def list_referral_candidates() -> list[dict]:
     either the Invoiced or still-open stages) purely so mark_referral_paid
     can also flip that deal to Closed Won - a best-effort side effect, not
     a requirement for the job to show up here."""
-    from tools.zoho_list_invoiced_deals import list_invoiced_deals
-    from tools.zoho_list_staging_candidates import list_staging_candidates
-
-    zoho_by_addr = {}
-    for d in list_invoiced_deals() + list_staging_candidates():
-        if d.get("address"):
-            zoho_by_addr.setdefault(_normalize_address(d["address"]), d["id"])
+    zoho_by_addr = _zoho_deal_id_by_addr()
 
     unformatted = _get_rows(render="UNFORMATTED_VALUE")
     formatted = _get_rows(render="FORMATTED_VALUE")
