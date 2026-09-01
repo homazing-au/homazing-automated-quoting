@@ -19,9 +19,22 @@ load_dotenv()
 API_URL = "https://api.twilio.com/2010-04-01/Accounts/{sid}/Messages.json"
 
 
+def _to_e164_au(number: str) -> str:
+    """Zoho stores AU mobiles in local format ('0400 105 005'); Twilio
+    requires E.164 ('+61400105005'). Leaves already-international numbers
+    (starting with '+') untouched."""
+    digits = "".join(c for c in number if c.isdigit() or c == "+")
+    if digits.startswith("+"):
+        return digits
+    if digits.startswith("0"):
+        return "+61" + digits[1:]
+    return digits
+
+
 def send_sms(to: str, body: str) -> None:
     if not to:
         return
+    to = _to_e164_au(to)
 
     sid = os.getenv("TWILIO_ACCOUNT_SID")
     token = os.getenv("TWILIO_AUTH_TOKEN")
