@@ -53,7 +53,11 @@ def _cell(row, idx):
 
 
 def _normalize_address(addr: str) -> str:
-    return "".join(addr.lower().split())
+    """Compare on street-only, e.g. Zoho's '11 Rhubarb Rd, Manor Lakes, VIC
+    3024' against the sheet's '11 Rhubarb Rd' (Address/Suburb are separate
+    columns there - same convention as google_sheets.py's _parse_street)."""
+    street = addr.split(",", 1)[0]
+    return "".join(street.lower().split())
 
 
 def list_staging_complete_candidates() -> list[dict]:
