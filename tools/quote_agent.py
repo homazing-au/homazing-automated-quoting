@@ -1021,7 +1021,7 @@ def handle_message(chat_id: str, text: str, reply_to_id: int | None = None) -> s
             if last_idx is None:
                 return "Paid for which one? Ask *how much for N* first, or say *referral paid for N*."
             c = candidates[last_idx]
-            mark_referral_paid(c["row"])
+            mark_referral_paid(c["row"], c.get("deal_id", ""))
             return f"Marked referral paid for {c['address']}."
 
         if "how much" in lowered:
@@ -1038,7 +1038,7 @@ def handle_message(chat_id: str, text: str, reply_to_id: int | None = None) -> s
             c = _candidate_from_text(lowered)
             if not c:
                 return "Referral paid for which number? e.g. *referral paid for 2*"
-            mark_referral_paid(c["row"])
+            mark_referral_paid(c["row"], c.get("deal_id", ""))
             return f"Marked referral paid for {c['address']}."
 
         return (

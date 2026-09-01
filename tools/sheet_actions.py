@@ -52,14 +52,33 @@ def _cell(row, idx):
     return row[idx] if idx < len(row) else None
 
 
+def _normalize_address(addr: str) -> str:
+    return "".join(addr.lower().split())
+
+
 def list_staging_complete_candidates() -> list[dict]:
-    """Jobs with a blank Staged Date (F) - not yet marked as staged today."""
+    """Jobs that could still need staging: any Zoho deal not yet Closed Won/
+    Closed Lost (awaiting approval, approved, or invoiced - staging can
+    happen at any of those points), matched to its sheet row, excluding
+    rows that already have a Staged Date (F)."""
+    from tools.zoho_list_staging_candidates import list_staging_candidates
+
+    zoho_deals = list_staging_candidates()
+    sheet_rows = list(enumerate(_get_rows(), start=4))
+
     candidates = []
-    for i, row in enumerate(_get_rows(), start=4):
-        addr = _cell(row, 1)
-        staged_date = _cell(row, 5)
-        if addr and not staged_date:
-            candidates.append({"row": i, "address": addr})
+    for deal in zoho_deals:
+        deal_addr = deal["address"]
+        if not deal_addr:
+            continue
+        norm = _normalize_address(deal_addr)
+        for i, row in sheet_rows:
+            addr = _cell(row, 1)
+            if addr and _normalize_address(addr) == norm:
+                staged_date = _cell(row, 5)
+                if not staged_date:
+                    candidates.append({"row": i, "address": addr})
+                break
     return candidates
 
 
@@ -73,15 +92,28 @@ def mark_staged(row: int) -> None:
 
 
 def list_staging_removed_candidates() -> list[dict]:
-    """Jobs with Staged Date filled but Staging Removed Date (J) blank -
-    currently staged, awaiting pickup."""
+    """Jobs in Zoho's 'Invoiced' stage, matched to a sheet row that has a
+    Staged Date (F) but no Staging Removed Date (J) yet - currently staged,
+    awaiting pickup. Staging removal only applies once invoiced."""
+    from tools.zoho_list_invoiced_deals import list_invoiced_deals
+
+    zoho_deals = list_invoiced_deals()
+    sheet_rows = list(enumerate(_get_rows(), start=4))
+
     candidates = []
-    for i, row in enumerate(_get_rows(), start=4):
-        addr = _cell(row, 1)
-        staged_date = _cell(row, 5)
-        removed_date = _cell(row, 9)
-        if addr and staged_date and not removed_date:
-            candidates.append({"row": i, "address": addr})
+    for deal in zoho_deals:
+        deal_addr = deal["address"]
+        if not deal_addr:
+            continue
+        norm = _normalize_address(deal_addr)
+        for i, row in sheet_rows:
+            addr = _cell(row, 1)
+            if addr and _normalize_address(addr) == norm:
+                staged_date = _cell(row, 5)
+                removed_date = _cell(row, 9)
+                if staged_date and not removed_date:
+                    candidates.append({"row": i, "address": addr})
+                break
     return candidates
 
 
@@ -95,27 +127,47 @@ def mark_staging_removed(row: int) -> None:
 
 
 def list_referral_candidates() -> list[dict]:
-    """Jobs where a referral is owed (X=Y) and not yet paid (Z blank)."""
-    unformatted = _get_rows(render="UNFORMATTED_VALUE")
+    """Jobs in Zoho's 'Invoiced' stage, matched to a sheet row where a
+    referral is owed (X=Y) and not yet paid (Z blank)."""
+    from tools.zoho_list_invoiced_deals import list_invoiced_deals
+
+    zoho_deals = list_invoiced_deals()
+    unformatted = list(enumerate(_get_rows(render="UNFORMATTED_VALUE"), start=4))
     formatted = _get_rows(render="FORMATTED_VALUE")
+
     candidates = []
-    for i, (row, frow) in enumerate(zip(unformatted, formatted), start=4):
-        addr = _cell(row, 1)
-        referral_yn = _cell(row, 23)
-        referral_paid = _cell(row, 25)
-        if addr and referral_yn == "Y" and not referral_paid:
-            amount_display = _cell(frow, 24) or "$0"
-            candidates.append({"row": i, "address": addr, "amount_display": amount_display.strip()})
+    for deal in zoho_deals:
+        deal_addr = deal["address"]
+        if not deal_addr:
+            continue
+        norm = _normalize_address(deal_addr)
+        for idx, (i, row) in enumerate(unformatted):
+            addr = _cell(row, 1)
+            if addr and _normalize_address(addr) == norm:
+                referral_yn = _cell(row, 23)
+                referral_paid = _cell(row, 25)
+                if referral_yn == "Y" and not referral_paid:
+                    frow = formatted[idx]
+                    amount_display = (_cell(frow, 24) or "$0").strip()
+                    candidates.append({
+                        "row": i, "address": addr,
+                        "amount_display": amount_display,
+                        "deal_id": deal["id"],
+                    })
+                break
     return candidates
 
 
-def mark_referral_paid(row: int) -> None:
+def mark_referral_paid(row: int, deal_id: str = "") -> None:
     _service().spreadsheets().values().update(
         spreadsheetId=SHEET_ID,
         range=f"'{TAB}'!Z{row}",
         valueInputOption="RAW",
         body={"values": [["Y"]]},
     ).execute()
+    if deal_id:
+        from tools.zoho_update_quote import mark_deal_closed_won
+        mark_deal_closed_won(deal_id)
 
 
 def get_referral_amount_display(row: int) -> str:

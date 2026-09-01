@@ -95,3 +95,16 @@ def mark_deal_invoiced(deal_id: str) -> None:
         json={"data": [{"id": deal_id, "Stage": "Invoiced"}]},
     )
     resp.raise_for_status()
+
+
+def mark_deal_closed_won(deal_id: str) -> None:
+    """Called once the referral on an invoiced Deal has been paid - the last
+    step in the pipeline, so the Deal moves to 'Closed Won'."""
+    token   = get_access_token()
+    headers = {"Authorization": f"Zoho-oauthtoken {token}"}
+    resp = requests.put(
+        f"{CRM_BASE}/Deals",
+        headers=headers,
+        json={"data": [{"id": deal_id, "Stage": "Closed Won"}]},
+    )
+    resp.raise_for_status()

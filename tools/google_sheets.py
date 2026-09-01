@@ -125,8 +125,9 @@ def append_staging_job(address: str, agency: str, agent_name: str, gross: float,
 
 def set_invoice_number(address: str, invoice_number: str) -> dict:
     """Write the QuickBooks invoice number into column AA of the row matching
-    `address` (exact match against column B), so the Sales Agent's weekly
-    QuickBooks payment check knows which invoice to look up.
+    `address` (matched by street portion only, against column B — same as
+    append_staging_job stores there), so the Sales Agent's weekly QuickBooks
+    payment check knows which invoice to look up.
 
     Matches the *most recent* row with this exact address, in case the same
     property was staged more than once. Returns {"row": n} on success, or
@@ -141,7 +142,7 @@ def set_invoice_number(address: str, invoice_number: str) -> dict:
         range=f"'{TAB}'!B4:B2000",
     ).execute().get("values", [])
 
-    target = address.strip().lower()
+    target = _parse_street(address).strip().lower()
     match_row = None
     for i, row in enumerate(col_b):
         if row and row[0].strip().lower() == target:
