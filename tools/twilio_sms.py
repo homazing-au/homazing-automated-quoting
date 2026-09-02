@@ -8,6 +8,11 @@ now, and start actually sending the moment .env is filled in.
 
 Never raises - an SMS failure should never block the sheet/Zoho update it's
 attached to.
+
+Gated separately by SMS_ENABLED (must be "1"/"true"/"yes" - anything else,
+including unset, is paused). This is the on/off switch for going live once
+the "Homazing" sender ID is verified: flip it in Render's env vars
+dashboard directly, no redeploy or code change needed.
 """
 
 import os
@@ -33,6 +38,9 @@ def _to_e164_au(number: str) -> str:
 
 def send_sms(to: str, body: str) -> None:
     if not to:
+        return
+    if os.getenv("SMS_ENABLED", "").strip().lower() not in ("1", "true", "yes"):
+        print(f"[sms] Paused (SMS_ENABLED not set) - would send to {to}: {body!r}")
         return
     to = _to_e164_au(to)
 

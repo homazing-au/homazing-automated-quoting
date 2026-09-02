@@ -679,6 +679,32 @@ def _start_referral_list(chat_id: str) -> str:
     )
 
 
+def _start_invoice_paid(chat_id: str) -> str:
+    from tools.sheet_actions import list_invoice_paid_candidates
+    candidates = list_invoice_paid_candidates()
+    if not candidates:
+        return "No outstanding invoices to mark paid."
+    session = {"stage": "INVOICE_PAID_PICK", "data": {"candidates": candidates}}
+    _save_session(chat_id, session)
+    lines = [f"{i + 1}. {c['address']}" for i, c in enumerate(candidates)]
+    return "Which address(es) had their invoice paid? Reply with the number(s), e.g. *2* or *2,4*:\n\n" + "\n".join(lines)
+
+
+def _start_quote_declined(chat_id: str) -> str:
+    from tools.sheet_actions import list_quote_declined_candidates
+    candidates = list_quote_declined_candidates()
+    if not candidates:
+        return "No pending quotes to decline."
+    session = {"stage": "QUOTE_DECLINED_PICK", "data": {"candidates": candidates}}
+    _save_session(chat_id, session)
+    lines = [f"{i + 1}. {c['address']}" for i, c in enumerate(candidates)]
+    return (
+        "Which quote(s) were declined? Reply with the number(s), e.g. *2* or *2,4*:\n\n"
+        + "\n".join(lines)
+        + "\n\nThis moves the Zoho deal to Closed Lost and removes the row from the sheet."
+    )
+
+
 def _start_new_quote(chat_id: str) -> str:
     _clear_session(chat_id)
     _save_session(chat_id, {"stage": "GET_ADDRESS", "data": {}})
@@ -693,6 +719,8 @@ MENU_ITEMS = [
     ("Staging complete", _start_staging_complete),
     ("Staging removed", _start_staging_removed),
     ("Referral", _start_referral_list),
+    ("Invoice paid", _start_invoice_paid),
+    ("Quote declined", _start_quote_declined),
 ]
 
 
@@ -722,6 +750,12 @@ def handle_message(chat_id: str, text: str, reply_to_id: int | None = None) -> s
 
     if normalized in ("referral", "referrals", "referral list", "list referrals"):
         return _start_referral_list(chat_id)
+
+    if normalized in ("invoice paid", "invoice paid list"):
+        return _start_invoice_paid(chat_id)
+
+    if normalized in ("quote declined", "quote decline", "declined", "decline quote"):
+        return _start_quote_declined(chat_id)
 
     if normalized in ("hi", "hello", "hey", "help", "menu", "commands", "what can you do"):
         return _start_help_menu(chat_id)
@@ -1056,6 +1090,54 @@ def handle_message(chat_id: str, text: str, reply_to_id: int | None = None) -> s
             done.append(c["address"])
         _clear_session(chat_id)
         return "Marked staging removed today:\n" + "\n".join(f"• {a}" for a in done)
+
+    # ── INVOICE_PAID_PICK — mark Invoice Paid (T) = Y, move Zoho deal to Closed Won ─
+    if stage == "INVOICE_PAID_PICK":
+        from tools.sheet_actions import mark_invoice_paid
+        candidates = data.get("candidates", [])
+        nums = _extract_numbers(text)
+        if not nums:
+            return "Please reply with the number(s) of the address(es), e.g. *2* or *2,4*."
+        indices = [int(n) - 1 for n in nums]
+        if any(i < 0 or i >= len(candidates) for i in indices):
+            return f"Please reply with number(s) between 1 and {len(candidates)}."
+        done = []
+        for i in indices:
+            c = candidates[i]
+            mark_invoice_paid(c["row"], c.get("deal_id", ""))
+            done.append(c["address"])
+        _clear_session(chat_id)
+        return "Marked invoice paid:\n" + "\n".join(f"• {a}" for a in done)
+
+    # ── QUOTE_DECLINED_PICK — pick which address(es), then ask for confirmation ──
+    if stage == "QUOTE_DECLINED_PICK":
+        candidates = data.get("candidates", [])
+        nums = _extract_numbers(text)
+        if not nums:
+            return "Please reply with the number(s) of the address(es), e.g. *2* or *2,4*."
+        indices = [int(n) - 1 for n in nums]
+        if any(i < 0 or i >= len(candidates) for i in indices):
+            return f"Please reply with number(s) between 1 and {len(candidates)}."
+        chosen = [candidates[i] for i in indices]
+        session["stage"] = "QUOTE_DECLINED_CONFIRM"
+        session["data"] = {"chosen": chosen}
+        _save_session(chat_id, session)
+        lines = "\n".join(f"• {c['address']}" for c in chosen)
+        return (
+            f"Confirm: move the Zoho deal to Closed Lost and *permanently delete* the row "
+            f"from the sheet (renumbering the rest) for:\n\n{lines}\n\n"
+            f"This can't be undone from here. Reply *YES* to confirm, or anything else to cancel."
+        )
+
+    # ── QUOTE_DECLINED_CONFIRM — only proceeds on an explicit "yes" ─────────────
+    if stage == "QUOTE_DECLINED_CONFIRM":
+        chosen = data.get("chosen", [])
+        _clear_session(chat_id)
+        if text.strip().lower() not in ("yes", "y", "confirm"):
+            return "Cancelled - nothing was changed."
+        from tools.sheet_actions import mark_quotes_declined
+        mark_quotes_declined(chosen)
+        return "Declined and removed from the sheet:\n" + "\n".join(f"• {c['address']}" for c in chosen)
 
     # ── REFERRAL_ACTIVE — "how much for N" / "referral paid for N" / bare "paid" ─
     if stage == "REFERRAL_ACTIVE":

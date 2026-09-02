@@ -108,3 +108,17 @@ def mark_deal_closed_won(deal_id: str) -> None:
         json={"data": [{"id": deal_id, "Stage": "Closed Won"}]},
     )
     resp.raise_for_status()
+
+
+def mark_deal_closed_lost(deal_id: str) -> None:
+    """Called when a customer/agent declines a quote still in 'Quote
+    Awaiting Approval' - the deal never converts, so it moves to
+    'Closed Lost'."""
+    token   = get_access_token()
+    headers = {"Authorization": f"Zoho-oauthtoken {token}"}
+    resp = requests.put(
+        f"{CRM_BASE}/Deals",
+        headers=headers,
+        json={"data": [{"id": deal_id, "Stage": "Closed Lost"}]},
+    )
+    resp.raise_for_status()
