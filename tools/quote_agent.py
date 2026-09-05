@@ -624,6 +624,15 @@ def _notify_staging_event(deal_id: str, address: str, event: str) -> None:
                 f"Hi {first}, congratulations on the sale! The furniture styling has been removed "
                 f"from {address}. Thanks again for choosing Homazing."
             )
+            # Second review-ask touchpoint: only the customer, only on staging
+            # removed. No harm if they already left one via the scraper's
+            # review request - they'll just ignore a repeat ask.
+            review_link = os.getenv("GOOGLE_REVIEW_LINK", "")
+            if role == "customer" and event == "removed" and review_link:
+                body += (
+                    f" If you have a moment, we'd really appreciate a 5-star review: {review_link} "
+                    f"(We appreciate it if you've already left one!)"
+                )
         send_sms(contact["mobile"], body)
 
 
