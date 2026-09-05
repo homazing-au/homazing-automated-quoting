@@ -612,16 +612,16 @@ def _notify_staging_event(deal_id: str, address: str, event: str) -> None:
         first = _first_name(contact.get("name", ""))
         if role == "assistant":
             body = (
-                f"Hi {first}, the styling is complete at {address} and ready for photos. Thank you!"
+                f"Hi {first},\nthe styling is complete at {address} and ready for photos. Thank you!"
                 if event == "staged" else
-                f"Hi {first}, the furniture styling has been removed from {address}. Thank you!"
+                f"Hi {first},\nthe furniture styling has been removed from {address}. Thank you!"
             )
         else:
             body = (
-                f"Hi {first}, the styling is complete at {address} and ready for photos. "
+                f"Hi {first},\nthe styling is complete at {address} and ready for photos. "
                 f"Thanks for choosing Homazing, wishing you all the best with the sale!"
                 if event == "staged" else
-                f"Hi {first}, congratulations on the sale! The furniture styling has been removed "
+                f"Hi {first},\ncongratulations on the sale! The furniture styling has been removed "
                 f"from {address}. Thanks again for choosing Homazing."
             )
             # Second review-ask touchpoint: only the customer, only on staging
@@ -647,7 +647,7 @@ def _notify_referral_paid(deal_id: str, address: str) -> None:
         first = _first_name(agent.get("name", ""))
         send_sms(
             agent["mobile"],
-            f"Hi {first}, your referral payment for {address} has been sent. "
+            f"Hi {first},\nyour referral payment for {address} has been sent. "
             f"Thanks so much for the business, we really appreciate it!",
         )
 
