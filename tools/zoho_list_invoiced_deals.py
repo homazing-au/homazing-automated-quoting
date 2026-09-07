@@ -1,6 +1,6 @@
 """List Zoho CRM Deals in the 'Invoiced' stage. Backs the Telegram bot's
 'staging removed' command - staging only gets picked up once the job has
-been invoiced.
+been invoiced - and the 'resend invoice' command.
 """
 
 import requests
@@ -27,5 +27,6 @@ def list_invoiced_deals() -> list[dict]:
         results.append({
             "id":      d.get("id"),
             "address": d.get("Deal_Name", ""),
+            "amount":  d.get("Amount", 0),
         })
     return results

@@ -217,6 +217,31 @@ def _extract_agent_details(text: str) -> dict | None:
         return None
 
 
+def _apply_flat_total(pricing: dict, new_total: float) -> dict:
+    """Override a pricing dict's total to a flat dollar amount, rounding to
+    the nearest $10 and folding the delta into added/reduced so the summary
+    still reads sensibly. Shared by the manual price-override paths (initial
+    quote confirmation, quote editing, and resend-with-a-new-amount)."""
+    new_total = mround(new_total, 10)
+    gst = round(new_total / 11, 2)
+    subtotal_ex_gst = round(new_total - gst, 2)
+    delta = new_total - pricing["total_inc_gst"]
+    added   = pricing.get("added", 0)
+    reduced = pricing.get("reduced", 0)
+    if delta >= 0:
+        added += delta
+    else:
+        reduced += -delta
+    return {
+        **pricing,
+        "total_inc_gst":   new_total,
+        "gst":             gst,
+        "subtotal_ex_gst": subtotal_ex_gst,
+        "added":           round(added, 2),
+        "reduced":         round(reduced, 2),
+    }
+
+
 def _format_price_summary(pricing: dict) -> str:
     lines = []
     for item in pricing["line_items"]:
@@ -571,6 +596,108 @@ def _do_send_invoice(deal: dict) -> str:
         return f"Invoice creation failed: {e}"
 
 
+def _start_resend_quote_list(chat_id: str) -> str:
+    """Numbered list of quotes still awaiting approval (same Zoho stage as
+    'quote declined'), each matched to its local quote record so the current
+    total can be shown. Picking a number resends as-is; picking a number
+    followed by an amount (e.g. '2 2400') revises the total first."""
+    from tools.sheet_actions import list_quote_declined_candidates
+    from tools.google_sheets import _normalize_address
+    deals = list_quote_declined_candidates()
+    if not deals:
+        return "No quotes are currently awaiting approval to resend."
+
+    by_deal = {}
+    by_addr = {}
+    for f in QUOTES_DIR.glob("*.json"):
+        try:
+            record = json.loads(f.read_text())
+        except Exception:
+            continue
+        quote_number = f.stem
+        if record.get("deal_id"):
+            by_deal[record["deal_id"]] = (quote_number, record)
+        if record.get("address"):
+            by_addr.setdefault(_normalize_address(record["address"]), (quote_number, record))
+
+    candidates = []
+    for d in deals:
+        match = by_deal.get(d["deal_id"]) or by_addr.get(_normalize_address(d["address"]))
+        if not match:
+            continue
+        quote_number, record = match
+        candidates.append({
+            "quote_number": quote_number,
+            "address":      record.get("address", d["address"]),
+            "total":        record["pricing"]["total_inc_gst"],
+        })
+    if not candidates:
+        return "No quotes are currently awaiting approval to resend."
+
+    session = {"stage": "RESEND_QUOTE_PICK", "data": {"candidates": candidates}}
+    _save_session(chat_id, session)
+    lines = [f"{i + 1}. {c['address']} — ${c['total']:,.0f}" for i, c in enumerate(candidates)]
+    return (
+        "Which quote do you want to resend? Reply with the number "
+        "(e.g. *2* to resend as-is, or *2 2400* to change the total first):\n\n"
+        + "\n".join(lines)
+    )
+
+
+def _start_resend_invoice_list(chat_id: str) -> str:
+    from tools.zoho_list_invoiced_deals import list_invoiced_deals
+    deals = list_invoiced_deals()
+    if not deals:
+        return "No invoiced jobs to resend."
+    session = {"stage": "RESEND_INVOICE_PICK", "data": {"candidates": deals}}
+    _save_session(chat_id, session)
+    lines = [f"{i + 1}. {d['address']}" for i, d in enumerate(deals)]
+    return "Which invoice do you want to resend? Reply with the number:\n\n" + "\n".join(lines)
+
+
+def _do_resend_invoice(deal: dict) -> str:
+    """Re-send the email for an already-created invoice - no new Zoho or
+    QuickBooks invoice is created (that only happens via 'Send invoice')."""
+    from tools.zoho_create_invoice import get_invoice_by_subject
+    from tools.zoho_get_deal_contacts import get_deal_sms_contacts
+    from tools.zoho_send_invoice_email import send_invoice_email
+    try:
+        invoice = get_invoice_by_subject(deal["address"])
+        if not invoice:
+            return f"No existing invoice found for {deal['address']} — use *Send invoice* instead."
+
+        total = deal.get("amount", 0)
+        gst = round(total / 11, 2)
+        pricing = {
+            "line_items": [], "referral": 0, "added": 0, "reduced": 0,
+            "total_inc_gst": total, "gst": gst,
+            "subtotal_ex_gst": round(total - gst, 2),
+        }
+
+        contacts = get_deal_sms_contacts(deal["id"])
+        agent = contacts.get("agent") or {}
+        customer = contacts.get("customer") or {}
+        to_emails = [e for e in (customer.get("email"), agent.get("email")) if e]
+        if not to_emails:
+            return f"No email on file for {deal['address']} — send manually."
+        contact_name = customer.get("name") or agent.get("name") or "Customer"
+
+        send_invoice_email(
+            to_emails=to_emails,
+            contact_name=contact_name,
+            invoice_number=invoice["invoice_number"],
+            address=deal["address"],
+            total_inc_gst=total,
+            pricing=pricing,
+        )
+        return (
+            f"Invoice *{invoice['invoice_number']}* resent for {deal['address']}\n"
+            f"Emailed to {', '.join(to_emails)}"
+        )
+    except Exception as e:
+        return f"Resend invoice failed: {e}"
+
+
 _WORD_NUMBERS = {
     "one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
     "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10,
@@ -724,7 +851,9 @@ def _start_new_quote(chat_id: str) -> str:
 # Each entry: (label, function(chat_id) -> reply text that starts that flow).
 MENU_ITEMS = [
     ("New quote", _start_new_quote),
+    ("Resend quote", _start_resend_quote_list),
     ("Send invoice", _start_send_invoice),
+    ("Resend invoice", _start_resend_invoice_list),
     ("Staging complete", _start_staging_complete),
     ("Staging removed", _start_staging_removed),
     ("Referral", _start_referral_list),
@@ -743,6 +872,10 @@ def _start_help_menu(chat_id: str) -> str:
 def handle_message(chat_id: str, text: str, reply_to_id: int | None = None) -> str:
     text = text.strip()
 
+    if text.lower() in ("cancel", "/cancel"):
+        _clear_session(chat_id)
+        return "Cancelled. Send *hi* to start again."
+
     if text.lower() in ("/start", "/new", "/reset"):
         return _start_new_quote(chat_id)
 
@@ -750,6 +883,12 @@ def handle_message(chat_id: str, text: str, reply_to_id: int | None = None) -> s
         return _start_send_invoice(chat_id)
 
     normalized = text.lower().lstrip("/").replace("_", " ").strip()
+
+    if normalized in ("resend quote", "resend a quote"):
+        return _start_resend_quote_list(chat_id)
+
+    if normalized in ("resend invoice", "resend an invoice"):
+        return _start_resend_invoice_list(chat_id)
 
     if normalized == "staging complete":
         return _start_staging_complete(chat_id)
@@ -891,25 +1030,7 @@ def handle_message(chat_id: str, text: str, reply_to_id: int | None = None) -> s
         if "%" not in text:
             flat_total = _extract_amount(text)
             if flat_total and flat_total > 100:
-                new_total = mround(flat_total, 10)
-                pricing = data["pricing"]
-                gst = round(new_total / 11, 2)
-                subtotal_ex_gst = round(new_total - gst, 2)
-                delta = new_total - pricing["total_inc_gst"]
-                added   = pricing.get("added", 0)
-                reduced = pricing.get("reduced", 0)
-                if delta >= 0:
-                    added += delta
-                else:
-                    reduced += -delta
-                new_pricing = {
-                    **pricing,
-                    "total_inc_gst":   new_total,
-                    "gst":             gst,
-                    "subtotal_ex_gst": subtotal_ex_gst,
-                    "added":           round(added, 2),
-                    "reduced":         round(reduced, 2),
-                }
+                new_pricing = _apply_flat_total(data["pricing"], flat_total)
                 data["pricing"] = new_pricing
                 session["stage"] = "CONFIRM_PRICE"
                 _save_session(chat_id, session)
@@ -1050,6 +1171,38 @@ def handle_message(chat_id: str, text: str, reply_to_id: int | None = None) -> s
         deal = candidates[idx]
         _clear_session(chat_id)
         return _do_send_invoice(deal)
+
+    # ── RESEND_QUOTE_PICK — pick a pending quote, optionally with a new amount ──
+    if stage == "RESEND_QUOTE_PICK":
+        candidates = data.get("candidates", [])
+        m = re.match(r'^\s*(\d+)\s*(?:[,\s]+\$?([\d,]+(?:\.\d+)?))?\s*$', text)
+        if not m:
+            return "Please reply with the number of the property, optionally followed by a new amount, e.g. *2* or *2 2400*."
+        idx = int(m.group(1)) - 1
+        if idx < 0 or idx >= len(candidates):
+            return f"Please reply with a number between 1 and {len(candidates)}."
+        chosen = candidates[idx]
+        record = _load_quote_record(chosen["quote_number"])
+        if not record:
+            return f"Quote record for *{chosen['address']}* not found."
+        pricing = record["pricing"]
+        if m.group(2):
+            pricing = _apply_flat_total(pricing, float(m.group(2).replace(",", "")))
+        session["data"] = {**record, "quote_number": chosen["quote_number"]}
+        return _do_resend_quote(chat_id, session, pricing)
+
+    # ── RESEND_INVOICE_PICK — pick an already-invoiced job to resend the email ──
+    if stage == "RESEND_INVOICE_PICK":
+        candidates = data.get("candidates", [])
+        m = re.match(r'^\s*(\d+)\s*$', text)
+        if not m:
+            return "Please reply with just the number of the invoice to resend."
+        idx = int(m.group(1)) - 1
+        if idx < 0 or idx >= len(candidates):
+            return f"Please reply with a number between 1 and {len(candidates)}."
+        deal = candidates[idx]
+        _clear_session(chat_id)
+        return _do_resend_invoice(deal)
 
     # ── HELP_MENU_PICK — numbered menu from "hi"/"help" ──────────────────────────
     if stage == "HELP_MENU_PICK":
@@ -1200,25 +1353,7 @@ def handle_message(chat_id: str, text: str, reply_to_id: int | None = None) -> s
         new_total = _extract_amount(text)
         if new_total is None:
             return "Please provide the new total as a number, e.g. *2400* or *$2,400*."
-        new_total = mround(new_total, 10)
-        pricing = data["pricing"]
-        gst = round(new_total / 11, 2)
-        subtotal_ex_gst = round(new_total - gst, 2)
-        delta = new_total - pricing["total_inc_gst"]
-        added   = pricing.get("added", 0)
-        reduced = pricing.get("reduced", 0)
-        if delta >= 0:
-            added += delta
-        else:
-            reduced += -delta
-        new_pricing = {
-            **pricing,
-            "total_inc_gst":   new_total,
-            "gst":             gst,
-            "subtotal_ex_gst": subtotal_ex_gst,
-            "added":           round(added, 2),
-            "reduced":         round(reduced, 2),
-        }
+        new_pricing = _apply_flat_total(data["pricing"], new_total)
         return _do_resend_quote(chat_id, session, new_pricing)
 
     # ── CREATE_QUOTE (fallback — should be reached via _do_create_quote) ────────

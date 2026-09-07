@@ -74,3 +74,27 @@ def create_invoice(contact_id: str | None, pricing: dict, address: str = "", acc
         "id":             invoice_id,
         "invoice_number": invoice_number,
     }
+
+
+def get_invoice_by_subject(subject: str) -> dict | None:
+    """Find the most recently created Invoice record whose Subject matches
+    the given property address exactly (Subject is set to the address at
+    creation time by create_invoice above). Backs the 'resend invoice'
+    command, which resends an existing invoice's email rather than creating
+    a new one."""
+    token = get_access_token()
+    headers = {"Authorization": f"Zoho-oauthtoken {token}"}
+    resp = requests.get(
+        f"{CRM_BASE}/Invoices/search",
+        headers=headers,
+        params={"criteria": f"(Subject:equals:{subject})"},
+    )
+    if resp.status_code in (204, 404):
+        return None
+    resp.raise_for_status()
+    records = resp.json().get("data", [])
+    if not records:
+        return None
+    records.sort(key=lambda r: r.get("Created_Time", ""), reverse=True)
+    top = records[0]
+    return {"id": top.get("id"), "invoice_number": top.get("Invoice_No", top.get("id"))}
