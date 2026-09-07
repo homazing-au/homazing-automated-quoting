@@ -34,5 +34,6 @@ def list_staging_candidates() -> list[dict]:
             "id":      d.get("id"),
             "address": d.get("Deal_Name", ""),
             "stage":   d.get("Stage", ""),
+            "amount":  d.get("Amount", 0),
         })
     return results

@@ -597,13 +597,22 @@ def _do_send_invoice(deal: dict) -> str:
 
 
 def _start_resend_quote_list(chat_id: str) -> str:
-    """Numbered list of quotes still awaiting approval (same Zoho stage as
-    'quote declined'), each matched to its local quote record so the current
-    total can be shown. Picking a number resends as-is; picking a number
-    followed by an amount (e.g. '2 2400') revises the total first."""
-    from tools.sheet_actions import list_quote_declined_candidates
+    """Numbered list of quotes still in Zoho's 'Quote Awaiting Approval'
+    stage. Zoho is the source of truth for which quotes exist - the local
+    quote record (.tmp/quotes/*.json) is only used to enrich the entry with
+    the exact pricing breakdown when it's still around; when it's missing
+    (that directory is disposable/ephemeral and doesn't survive a bot
+    restart on Render) the quote is reconstructed from the Deal's Amount and
+    a Zoho Quotes lookup by address instead, so a lost local file never
+    makes a real pending quote disappear from this list. Picking a number
+    resends as-is; picking a number followed by an amount (e.g. '2 2400')
+    revises the total first."""
+    from tools.zoho_list_staging_candidates import list_staging_candidates
     from tools.google_sheets import _normalize_address
-    deals = list_quote_declined_candidates()
+    from tools.zoho_create_quote import get_quote_by_subject
+    from tools.zoho_get_deal_contacts import get_deal_sms_contacts
+
+    deals = [d for d in list_staging_candidates() if d.get("stage") == "Quote Awaiting Approval"]
     if not deals:
         return "No quotes are currently awaiting approval to resend."
 
@@ -611,25 +620,55 @@ def _start_resend_quote_list(chat_id: str) -> str:
     by_addr = {}
     for f in QUOTES_DIR.glob("*.json"):
         try:
-            record = json.loads(f.read_text())
+            local_record = json.loads(f.read_text())
         except Exception:
             continue
         quote_number = f.stem
-        if record.get("deal_id"):
-            by_deal[record["deal_id"]] = (quote_number, record)
-        if record.get("address"):
-            by_addr.setdefault(_normalize_address(record["address"]), (quote_number, record))
+        if local_record.get("deal_id"):
+            by_deal[local_record["deal_id"]] = (quote_number, local_record)
+        if local_record.get("address"):
+            by_addr.setdefault(_normalize_address(local_record["address"]), (quote_number, local_record))
 
     candidates = []
     for d in deals:
-        match = by_deal.get(d["deal_id"]) or by_addr.get(_normalize_address(d["address"]))
-        if not match:
+        if not d.get("address"):
             continue
-        quote_number, record = match
+        match = by_deal.get(d["id"]) or by_addr.get(_normalize_address(d["address"]))
+        if match:
+            quote_number, record = match
+            total = record["pricing"]["total_inc_gst"]
+        else:
+            quote = get_quote_by_subject(d["address"])
+            if not quote:
+                continue
+            contacts = get_deal_sms_contacts(d["id"])
+            agent = contacts.get("agent") or {}
+            customer = contacts.get("customer") or {}
+            total = d.get("amount", 0)
+            gst = round(total / 11, 2)
+            record = {
+                "quote_id":       quote["id"],
+                "deal_id":        d["id"],
+                "account_id":     "",
+                "contact_id":     "",
+                "agent_name":     agent.get("name", ""),
+                "agent_email":    agent.get("email", ""),
+                "customer_name":  customer.get("name", ""),
+                "customer_email": customer.get("email", ""),
+                "address":        d["address"],
+                "rooms":          {},
+                "pricing": {
+                    "line_items": [], "referral": 0, "added": 0, "reduced": 0,
+                    "total_inc_gst": total, "gst": gst,
+                    "subtotal_ex_gst": round(total - gst, 2),
+                },
+            }
+            quote_number = quote["quote_number"]
         candidates.append({
             "quote_number": quote_number,
             "address":      record.get("address", d["address"]),
-            "total":        record["pricing"]["total_inc_gst"],
+            "total":        total,
+            "record":       record,
         })
     if not candidates:
         return "No quotes are currently awaiting approval to resend."
@@ -1182,9 +1221,7 @@ def handle_message(chat_id: str, text: str, reply_to_id: int | None = None) -> s
         if idx < 0 or idx >= len(candidates):
             return f"Please reply with a number between 1 and {len(candidates)}."
         chosen = candidates[idx]
-        record = _load_quote_record(chosen["quote_number"])
-        if not record:
-            return f"Quote record for *{chosen['address']}* not found."
+        record = chosen["record"]
         pricing = record["pricing"]
         if m.group(2):
             pricing = _apply_flat_total(pricing, float(m.group(2).replace(",", "")))

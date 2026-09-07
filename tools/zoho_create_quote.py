@@ -99,3 +99,28 @@ def create_quote(account_id: str, pricing: dict, address: str = "", contact_id: 
         "quote_number": quote_number,
         "deal_id":      deal_id,
     }
+
+
+def get_quote_by_subject(subject: str) -> dict | None:
+    """Find the most recently created Quote record whose Subject matches the
+    given property address exactly (Subject is set to the address at
+    creation time by create_quote above). Fallback for the 'resend quote'
+    command when the local quote record (.tmp/quotes/*.json) is missing -
+    that directory is disposable/ephemeral and doesn't survive a bot
+    restart on Render, so Zoho is the durable source of truth here."""
+    token = get_access_token()
+    headers = {"Authorization": f"Zoho-oauthtoken {token}"}
+    resp = requests.get(
+        f"{CRM_BASE}/Quotes/search",
+        headers=headers,
+        params={"criteria": f"(Subject:equals:{subject})"},
+    )
+    if resp.status_code in (204, 404):
+        return None
+    resp.raise_for_status()
+    records = resp.json().get("data", [])
+    if not records:
+        return None
+    records.sort(key=lambda r: r.get("Created_Time", ""), reverse=True)
+    top = records[0]
+    return {"id": top.get("id"), "quote_number": top.get("Quote_Number", top.get("id"))}
