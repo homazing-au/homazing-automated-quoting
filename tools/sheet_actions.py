@@ -263,15 +263,19 @@ def _remove_rows_and_renumber(rows: list[int]) -> None:
 
 
 def mark_quotes_declined(candidates: list[dict]) -> None:
-    """candidates: [{'row', 'deal_id', ...}, ...]. Moves each matching Zoho
-    deal to Closed Lost, then removes all the given sheet rows and
-    renumbers column A in one batch - must be done together, since deleting
-    rows one at a time would invalidate the row numbers of the ones still
-    queued."""
+    """candidates: [{'row', 'deal_id', 'address', ...}, ...]. Moves each
+    matching Zoho deal to Closed Lost (and its linked Quote's Quote_Stage,
+    looked up by address, to Closed Lost too - so quote-side reporting
+    doesn't show a declined quote as still 'Delivered'), then removes all
+    the given sheet rows and renumbers column A in one batch - must be done
+    together, since deleting rows one at a time would invalidate the row
+    numbers of the ones still queued."""
     from tools.zoho_update_quote import mark_deal_closed_lost
+    from tools.zoho_create_quote import get_quote_by_subject
     for c in candidates:
         if c.get("deal_id"):
-            mark_deal_closed_lost(c["deal_id"])
+            quote = get_quote_by_subject(c["address"]) if c.get("address") else None
+            mark_deal_closed_lost(c["deal_id"], quote_id=quote["id"] if quote else "")
     _remove_rows_and_renumber([c["row"] for c in candidates])
 
 

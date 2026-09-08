@@ -110,10 +110,12 @@ def mark_deal_closed_won(deal_id: str) -> None:
     resp.raise_for_status()
 
 
-def mark_deal_closed_lost(deal_id: str) -> None:
+def mark_deal_closed_lost(deal_id: str, quote_id: str = "") -> None:
     """Called when a customer/agent declines a quote still in 'Quote
     Awaiting Approval' - the deal never converts, so it moves to
-    'Closed Lost'."""
+    'Closed Lost'. Also moves the linked Quote's Quote_Stage to 'Closed
+    Lost' (when quote_id is known) so quote-side reporting doesn't show a
+    declined quote as still 'Delivered'."""
     token   = get_access_token()
     headers = {"Authorization": f"Zoho-oauthtoken {token}"}
     resp = requests.put(
@@ -122,3 +124,11 @@ def mark_deal_closed_lost(deal_id: str) -> None:
         json={"data": [{"id": deal_id, "Stage": "Closed Lost"}]},
     )
     resp.raise_for_status()
+
+    if quote_id:
+        quote_resp = requests.put(
+            f"{CRM_BASE}/Quotes",
+            headers=headers,
+            json={"data": [{"id": quote_id, "Quote_Stage": "Closed Lost"}]},
+        )
+        quote_resp.raise_for_status()
