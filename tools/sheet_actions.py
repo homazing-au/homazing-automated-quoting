@@ -104,6 +104,57 @@ def mark_staged(row: int) -> None:
     ).execute()
 
 
+def resort_by_staged_date() -> None:
+    """Re-sort every data row by Staged Date (F) ascending, with the original
+    No. (A) as a tiebreak. Google Sheets' native sort always pushes blank
+    cells to the end regardless of sort order, so this makes completed jobs
+    bubble up in the order they were actually finished while everything
+    still awaiting staging drops to the bottom - instead of staying wherever
+    it happened to land when the quote was first sent. Self-referencing
+    per-row formulas (the FORMULA_COLUMNS in google_sheets.py) survive a
+    native sort correctly - Sheets re-points them to the row's new position,
+    same as a manual row drag - so they don't need to be rewritten here.
+
+    Call this once *after* marking every selected row in a multi-select
+    'staging complete' batch, not inside mark_staged itself - resorting
+    between each mark would invalidate the row numbers still queued in that
+    same batch."""
+    rows = _get_rows()
+    if not rows:
+        return
+    last_row = 3 + len(rows)
+    service = _service()
+    service.spreadsheets().batchUpdate(
+        spreadsheetId=SHEET_ID,
+        body={"requests": [{
+            "sortRange": {
+                "range": {
+                    "sheetId": SHEET_GID,
+                    "startRowIndex": 3,       # row 4, 0-indexed
+                    "endRowIndex": last_row,
+                    "startColumnIndex": 0,    # A
+                    "endColumnIndex": 27,     # through AA
+                },
+                "sortSpecs": [
+                    {"dimensionIndex": 5, "sortOrder": "ASCENDING"},  # F = Staged Date
+                    {"dimensionIndex": 0, "sortOrder": "ASCENDING"},  # A = No. (stable tiebreak)
+                ],
+            }
+        }]},
+    ).execute()
+
+    # The physical reorder leaves column A out of sequence - rewrite it to a
+    # clean 1..N run matching the new top-to-bottom order (same approach as
+    # _remove_rows_and_renumber after a quote-declined deletion).
+    values = [[i + 1] for i in range(len(_get_rows()))]
+    service.spreadsheets().values().update(
+        spreadsheetId=SHEET_ID,
+        range=f"'{TAB}'!A4:A{last_row}",
+        valueInputOption="RAW",
+        body={"values": values},
+    ).execute()
+
+
 def list_staging_removed_candidates() -> list[dict]:
     """Jobs with Staged Date (F) filled but Staging Removed Date (J) blank -
     currently staged, awaiting pickup. Sheet-only: an earlier version also

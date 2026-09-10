@@ -1254,7 +1254,7 @@ def handle_message(chat_id: str, text: str, reply_to_id: int | None = None) -> s
 
     # ── STAGING_COMPLETE_PICK — mark today as the Staged Date ───────────────────
     if stage == "STAGING_COMPLETE_PICK":
-        from tools.sheet_actions import mark_staged
+        from tools.sheet_actions import mark_staged, resort_by_staged_date
         candidates = data.get("candidates", [])
         nums = _extract_numbers(text)
         if not nums:
@@ -1268,6 +1268,9 @@ def handle_message(chat_id: str, text: str, reply_to_id: int | None = None) -> s
             mark_staged(c["row"])
             _notify_staging_event(c.get("deal_id", ""), c["address"], "staged")
             done.append(c["address"])
+        # One resort at the end, not per-row - resorting mid-loop would shift
+        # every remaining candidate's pre-fetched "row" index out from under it.
+        resort_by_staged_date()
         _clear_session(chat_id)
         return "Marked as staged today:\n" + "\n".join(f"• {a}" for a in done)
 
