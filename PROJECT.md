@@ -1,5 +1,16 @@
 # Homazing Automated Quoting — Telegram Bot
 
+**At a glance:**
+- Create new quotes
+- Resend quotes
+- Send invoices
+- Resend invoices
+- Mark staging complete
+- Mark staging removed
+- Track invoice payments
+- Handle declined quotes
+- Track referral payments
+
 A Telegram bot that runs Homazing's quoting, invoicing, and staging workflow end to end, wired into Zoho CRM, QuickBooks Online (invoice creation only), Twilio (SMS), and the "Homazing projects" Google Sheet. Deployed as a background worker on Render (long-polls Telegram; auto-redeploys on push to `master`).
 
 ## What it can do
