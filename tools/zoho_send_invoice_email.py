@@ -19,6 +19,7 @@ def send_invoice_email(
     address: str,
     total_inc_gst: float,
     pricing: dict | None = None,
+    cc_emails: list[str] | None = None,
 ) -> None:
     first_name = contact_name.strip().split()[0] if contact_name.strip() else contact_name
     due_date   = (date.today() + timedelta(days=14)).strftime("%#d %B %Y")
@@ -74,11 +75,14 @@ def send_invoice_email(
 </html>"""
 
     to_emails = list(dict.fromkeys(e for e in to_emails if e))  # dedupe, preserve order
+    cc_emails = list(dict.fromkeys(e for e in (cc_emails or []) if e and e not in to_emails))
 
     msg = MIMEMultipart("mixed")
     msg["Subject"] = f"Homazing Invoice - {address}"
     msg["From"]    = os.getenv("EMAIL_FROM", "Homazing <admin@homazing.com.au>")
     msg["To"]      = ", ".join(to_emails)
+    if cc_emails:
+        msg["Cc"] = ", ".join(cc_emails)
 
     # Attach plain + HTML body
     body_part = MIMEMultipart("alternative")
@@ -106,7 +110,9 @@ def send_invoice_email(
     user     = os.getenv("EMAIL_USER")
     password = os.getenv("EMAIL_PASSWORD")
 
-    envelope_to = to_emails if ADMIN_EMAIL in to_emails else [*to_emails, ADMIN_EMAIL]
+    envelope_to = to_emails + cc_emails
+    if ADMIN_EMAIL not in envelope_to:
+        envelope_to.append(ADMIN_EMAIL)
 
     with smtplib.SMTP(host, port) as s:
         s.starttls()

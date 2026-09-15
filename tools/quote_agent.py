@@ -568,10 +568,14 @@ def _do_send_invoice(deal: dict) -> str:
         if "error" in result:
             return f"Invoice creation failed: {result['error']}"
 
-        email_status = (
-            f"Invoice emailed to {', '.join(result.get('to_emails', []))}"
-            if result.get("email_sent") else "No email on file — send manually"
-        )
+        to_emails = result.get("to_emails", [])
+        cc_emails = result.get("cc_emails", [])
+        if result.get("email_sent"):
+            email_status = f"Invoice emailed to {', '.join(to_emails)}"
+            if cc_emails:
+                email_status += f" (cc: {', '.join(cc_emails)})"
+        else:
+            email_status = "No email on file — send manually"
         qbo_status = "Synced to QuickBooks" if result.get("qbo_ok") else "QuickBooks sync failed — check Telegram alert"
 
         invoice_number = result.get("invoice_number")
@@ -716,10 +720,12 @@ def _do_resend_invoice(deal: dict) -> str:
         contacts = get_deal_sms_contacts(deal["id"])
         agent = contacts.get("agent") or {}
         customer = contacts.get("customer") or {}
+        assistant = contacts.get("assistant") or {}
         to_emails = [e for e in (customer.get("email"), agent.get("email")) if e]
         if not to_emails:
             return f"No email on file for {deal['address']} — send manually."
         contact_name = customer.get("name") or agent.get("name") or "Customer"
+        cc_emails = [e] if (e := assistant.get("email")) and e not in to_emails else []
 
         send_invoice_email(
             to_emails=to_emails,
@@ -728,10 +734,12 @@ def _do_resend_invoice(deal: dict) -> str:
             address=deal["address"],
             total_inc_gst=total,
             pricing=pricing,
+            cc_emails=cc_emails,
         )
+        cc_note = f" (cc: {', '.join(cc_emails)})" if cc_emails else ""
         return (
             f"Invoice *{invoice['invoice_number']}* resent for {deal['address']}\n"
-            f"Emailed to {', '.join(to_emails)}"
+            f"Emailed to {', '.join(to_emails)}{cc_note}"
         )
     except Exception as e:
         return f"Resend invoice failed: {e}"

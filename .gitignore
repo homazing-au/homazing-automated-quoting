@@ -4,6 +4,9 @@
 credentials.json
 token.json
 
+# Customer data exports — real PII, never commit
+Docs/
+
 # Temporary / generated files
 .tmp/
 __pycache__/
