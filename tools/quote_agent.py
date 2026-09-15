@@ -328,6 +328,7 @@ def _do_create_quote(chat_id: str, session: dict) -> str:
                     )
                 except Exception as sheet_err:
                     print(f"Staging Jobs sheet append failed: {sheet_err}")
+                    email_status += f"\n⚠️ Staging Jobs sheet update failed: {sheet_err}"
             except Exception as email_err:
                 print(f"Email send failed: {email_err}")
                 email_status = f"Email failed: {email_err}"
@@ -426,6 +427,7 @@ def _do_create_customer_quote(chat_id: str, session: dict) -> str:
                     )
                 except Exception as sheet_err:
                     print(f"Staging Jobs sheet append failed: {sheet_err}")
+                    email_status += f"\n⚠️ Staging Jobs sheet update failed: {sheet_err}"
             except Exception as email_err:
                 print(f"Email send failed: {email_err}")
                 email_status = f"Email failed: {email_err}"
@@ -755,20 +757,23 @@ def _first_name(full_name: str) -> str:
     return full_name.split()[0] if full_name and full_name.split() else "there"
 
 
-def _notify_staging_event(deal_id: str, address: str, event: str) -> list[str]:
+def _notify_staging_event(deal_id: str, address: str, event: str) -> tuple[list[str], list[str]]:
     """event: 'staged' or 'removed'. Texts agent, customer (if a Contact
     exists - it won't if the agent approved the quote on the customer's
     behalf), and assistant (if the account has one on file) - the assistant
-    gets a shorter, purely factual version. Best-effort: no deal_id, no
-    contact, or no mobile number just means that recipient is silently
-    skipped. Returns a "First Name (role)" entry for each contact actually
-    texted, so the caller can confirm who received it."""
+    gets a shorter, purely factual version. No deal_id, no contact, or no
+    mobile number just means that recipient is silently skipped (nothing to
+    report - they were never going to be texted). Returns
+    (notified, failed): "First Name (role)" entries for contacts actually
+    texted, and ones Twilio failed to deliver to, so the caller can flag
+    real failures without a false-positive "texted X" claim."""
     if not deal_id:
-        return []
+        return [], []
     from tools.zoho_get_deal_contacts import get_deal_sms_contacts
     from tools.twilio_sms import send_sms
     contacts = get_deal_sms_contacts(deal_id)
     notified = []
+    failed = []
     for role in ("agent", "customer", "assistant"):
         contact = contacts.get(role)
         if not (contact and contact.get("mobile")):
@@ -797,28 +802,30 @@ def _notify_staging_event(deal_id: str, address: str, event: str) -> list[str]:
                     f" If you have a moment, we'd really appreciate a 5-star review: {review_link} "
                     f"(We appreciate it if you've already left one!)"
                 )
-        send_sms(contact["mobile"], body)
-        notified.append(f"{first} ({role})")
-    return notified
+        ok = send_sms(contact["mobile"], body)
+        (notified if ok else failed).append(f"{first} ({role})")
+    return notified, failed
 
 
-def _notify_referral_paid(deal_id: str, address: str) -> str | None:
+def _notify_referral_paid(deal_id: str, address: str) -> tuple[str | None, str | None]:
     """Texts the agent only, once their referral is marked paid. Returns
-    their first name if texted, so the caller can confirm who received it."""
+    (notified_name, failed_name) - at most one is set - so the caller can
+    confirm who actually received it without a false positive if Twilio
+    failed to deliver."""
     if not deal_id:
-        return None
+        return None, None
     from tools.zoho_get_deal_contacts import get_deal_sms_contacts
     from tools.twilio_sms import send_sms
     agent = get_deal_sms_contacts(deal_id).get("agent")
     if agent and agent.get("mobile"):
         first = _first_name(agent.get("name", ""))
-        send_sms(
+        ok = send_sms(
             agent["mobile"],
             f"Hi {first},\nYour referral payment for {address} has been sent. "
             f"Thanks so much for the business, we really appreciate it!",
         )
-        return first
-    return None
+        return (first, None) if ok else (None, first)
+    return None, None
 
 
 def _start_staging_complete(chat_id: str) -> str:
@@ -1266,17 +1273,28 @@ def handle_message(chat_id: str, text: str, reply_to_id: int | None = None) -> s
         if any(i < 0 or i >= len(candidates) for i in indices):
             return f"Please reply with number(s) between 1 and {len(candidates)}."
         done = []
+        errored = []
         for i in indices:
             c = candidates[i]
-            mark_staged(c["row"])
-            notified = _notify_staging_event(c.get("deal_id", ""), c["address"], "staged")
-            sms_note = f" — texted {', '.join(notified)}" if notified else " — no SMS sent (no contacts on file)"
-            done.append(f"{c['address']}{sms_note}")
+            try:
+                mark_staged(c["row"])
+                notified, failed = _notify_staging_event(c.get("deal_id", ""), c["address"], "staged")
+                sms_note = f" — texted {', '.join(notified)}" if notified else " — no SMS sent (no contacts on file)"
+                if failed:
+                    sms_note += f" — ⚠️ SMS FAILED for {', '.join(failed)}"
+                done.append(f"{c['address']}{sms_note}")
+            except Exception as row_err:
+                # Don't let one bad row abort the rest of the batch - keep going
+                # and report exactly which address(es) still need to be redone.
+                errored.append(f"{c['address']} — ⚠️ FAILED: {row_err}")
         # One resort at the end, not per-row - resorting mid-loop would shift
         # every remaining candidate's pre-fetched "row" index out from under it.
         resort_by_staged_date()
         _clear_session(chat_id)
-        return "Marked as staged today:\n" + "\n".join(f"• {a}" for a in done)
+        result = "Marked as staged today:\n" + "\n".join(f"• {a}" for a in done) if done else "Nothing marked."
+        if errored:
+            result += "\n\n⚠️ Failed (please retry these):\n" + "\n".join(f"• {a}" for a in errored)
+        return result
 
     # ── STAGING_REMOVED_PICK — mark today as the Staging Removed Date ───────────
     if stage == "STAGING_REMOVED_PICK":
@@ -1289,14 +1307,23 @@ def handle_message(chat_id: str, text: str, reply_to_id: int | None = None) -> s
         if any(i < 0 or i >= len(candidates) for i in indices):
             return f"Please reply with number(s) between 1 and {len(candidates)}."
         done = []
+        errored = []
         for i in indices:
             c = candidates[i]
-            mark_staging_removed(c["row"])
-            notified = _notify_staging_event(c.get("deal_id", ""), c["address"], "removed")
-            sms_note = f" — texted {', '.join(notified)}" if notified else " — no SMS sent (no contacts on file)"
-            done.append(f"{c['address']}{sms_note}")
+            try:
+                mark_staging_removed(c["row"])
+                notified, failed = _notify_staging_event(c.get("deal_id", ""), c["address"], "removed")
+                sms_note = f" — texted {', '.join(notified)}" if notified else " — no SMS sent (no contacts on file)"
+                if failed:
+                    sms_note += f" — ⚠️ SMS FAILED for {', '.join(failed)}"
+                done.append(f"{c['address']}{sms_note}")
+            except Exception as row_err:
+                errored.append(f"{c['address']} — ⚠️ FAILED: {row_err}")
         _clear_session(chat_id)
-        return "Marked staging removed today:\n" + "\n".join(f"• {a}" for a in done)
+        result = "Marked staging removed today:\n" + "\n".join(f"• {a}" for a in done) if done else "Nothing marked."
+        if errored:
+            result += "\n\n⚠️ Failed (please retry these):\n" + "\n".join(f"• {a}" for a in errored)
+        return result
 
     # ── INVOICE_PAID_PICK — mark Invoice Paid (T) = Y, move Zoho deal to Closed Won ─
     if stage == "INVOICE_PAID_PICK":
@@ -1309,12 +1336,19 @@ def handle_message(chat_id: str, text: str, reply_to_id: int | None = None) -> s
         if any(i < 0 or i >= len(candidates) for i in indices):
             return f"Please reply with number(s) between 1 and {len(candidates)}."
         done = []
+        errored = []
         for i in indices:
             c = candidates[i]
-            mark_invoice_paid(c["row"], c.get("deal_id", ""))
-            done.append(c["address"])
+            try:
+                mark_invoice_paid(c["row"], c.get("deal_id", ""))
+                done.append(c["address"])
+            except Exception as row_err:
+                errored.append(f"{c['address']} — ⚠️ FAILED: {row_err}")
         _clear_session(chat_id)
-        return "Marked invoice paid:\n" + "\n".join(f"• {a}" for a in done)
+        result = "Marked invoice paid:\n" + "\n".join(f"• {a}" for a in done) if done else "Nothing marked."
+        if errored:
+            result += "\n\n⚠️ Failed (please retry these):\n" + "\n".join(f"• {a}" for a in errored)
+        return result
 
     # ── QUOTE_DECLINED_PICK — pick which address(es), then ask for confirmation ──
     if stage == "QUOTE_DECLINED_PICK":
@@ -1367,8 +1401,13 @@ def handle_message(chat_id: str, text: str, reply_to_id: int | None = None) -> s
                 return "Paid for which one? Ask *how much for N* first, or say *referral paid for N*."
             c = candidates[last_idx]
             mark_referral_paid(c["row"], c.get("deal_id", ""))
-            notified = _notify_referral_paid(c.get("deal_id", ""), c["address"])
-            sms_note = f" — texted {notified} (agent)" if notified else " — no SMS sent (no agent contact on file)"
+            notified, failed = _notify_referral_paid(c.get("deal_id", ""), c["address"])
+            if failed:
+                sms_note = f" — ⚠️ SMS FAILED for {failed} (agent)"
+            elif notified:
+                sms_note = f" — texted {notified} (agent)"
+            else:
+                sms_note = " — no SMS sent (no agent contact on file)"
             return f"Marked referral paid for {c['address']}{sms_note}."
 
         if "how much" in lowered:
@@ -1386,8 +1425,13 @@ def handle_message(chat_id: str, text: str, reply_to_id: int | None = None) -> s
             if not c:
                 return "Referral paid for which number? e.g. *referral paid for 2*"
             mark_referral_paid(c["row"], c.get("deal_id", ""))
-            notified = _notify_referral_paid(c.get("deal_id", ""), c["address"])
-            sms_note = f" — texted {notified} (agent)" if notified else " — no SMS sent (no agent contact on file)"
+            notified, failed = _notify_referral_paid(c.get("deal_id", ""), c["address"])
+            if failed:
+                sms_note = f" — ⚠️ SMS FAILED for {failed} (agent)"
+            elif notified:
+                sms_note = f" — texted {notified} (agent)"
+            else:
+                sms_note = " — no SMS sent (no agent contact on file)"
             return f"Marked referral paid for {c['address']}{sms_note}."
 
         return (

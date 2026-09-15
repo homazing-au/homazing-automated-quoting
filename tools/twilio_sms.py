@@ -7,7 +7,8 @@ sent instead of failing - so this can be wired into every trigger point
 now, and start actually sending the moment .env is filled in.
 
 Never raises - an SMS failure should never block the sheet/Zoho update it's
-attached to.
+attached to. Instead it returns True/False so callers can tell whether the
+text actually went out and report a failure back to the user if not.
 
 Gated separately by SMS_ENABLED (must be "1"/"true"/"yes" - anything else,
 including unset, is paused). This is the on/off switch for going live once
@@ -36,12 +37,13 @@ def _to_e164_au(number: str) -> str:
     return digits
 
 
-def send_sms(to: str, body: str) -> None:
+def send_sms(to: str, body: str) -> bool:
+    """Returns True only if Twilio accepted the message for sending."""
     if not to:
-        return
+        return False
     if os.getenv("SMS_ENABLED", "").strip().lower() not in ("1", "true", "yes"):
         print(f"[sms] Paused (SMS_ENABLED not set) - would send to {to}: {body!r}")
-        return
+        return False
     to = _to_e164_au(to)
 
     sid = os.getenv("TWILIO_ACCOUNT_SID")
@@ -49,7 +51,7 @@ def send_sms(to: str, body: str) -> None:
     from_number = os.getenv("TWILIO_FROM")
     if not (sid and token and from_number):
         print(f"[sms] Twilio not configured yet - would send to {to}: {body!r}")
-        return
+        return False
 
     try:
         resp = requests.post(
@@ -60,5 +62,8 @@ def send_sms(to: str, body: str) -> None:
         )
         if resp.status_code >= 300:
             print(f"[sms] Twilio send to {to} failed ({resp.status_code}): {resp.text}")
+            return False
+        return True
     except Exception as e:
         print(f"[sms] Twilio send to {to} raised: {e}")
+        return False

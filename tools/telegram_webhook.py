@@ -66,23 +66,30 @@ def main():
                 if not is_authorised(chat_id):
                     send("Unauthorised.", chat_id)
                     continue
-                reply_to_id = msg.get("reply_to_message", {}).get("message_id")
-                # Capture stage BEFORE processing so confirmation messages map back to it
-                is_command = text.lower() in ("/new", "/start", "/reset")
-                prev_stage = _load_session(chat_id).get("stage", "") if not is_command else ""
-                send_typing(chat_id)
                 try:
-                    reply = handle_message(chat_id, text, reply_to_id=reply_to_id)
-                except Exception as handler_err:
-                    print(f"handle_message error: {handler_err}")
-                    reply = f"Something went wrong: {handler_err}\n\nSend /new to start again."
-                if reply:
-                    msg_id = send(reply, chat_id)
-                    # Tag this bot message with the stage it confirmed (not the next stage)
-                    if msg_id and prev_stage:
-                        sess = _load_session(chat_id)
-                        sess.setdefault("msg_map", {})[str(msg_id)] = prev_stage
-                        _save_session(chat_id, sess)
+                    reply_to_id = msg.get("reply_to_message", {}).get("message_id")
+                    # Capture stage BEFORE processing so confirmation messages map back to it
+                    is_command = text.lower() in ("/new", "/start", "/reset")
+                    prev_stage = _load_session(chat_id).get("stage", "") if not is_command else ""
+                    send_typing(chat_id)
+                    try:
+                        reply = handle_message(chat_id, text, reply_to_id=reply_to_id)
+                    except Exception as handler_err:
+                        print(f"handle_message error: {handler_err}")
+                        reply = f"Something went wrong: {handler_err}\n\nSend /new to start again."
+                    if reply:
+                        msg_id = send(reply, chat_id)
+                        # Tag this bot message with the stage it confirmed (not the next stage)
+                        if msg_id and prev_stage:
+                            sess = _load_session(chat_id)
+                            sess.setdefault("msg_map", {})[str(msg_id)] = prev_stage
+                            _save_session(chat_id, sess)
+                except Exception as pre_handler_err:
+                    # A failure here (e.g. loading the session) happens before
+                    # handle_message's own try/except, so without this the
+                    # message would be silently dropped with no reply at all.
+                    print(f"Message processing error before handler: {pre_handler_err}")
+                    send(f"Something went wrong processing your last message: {pre_handler_err}\n\nSend /new to start again.", chat_id)
         except KeyboardInterrupt:
             print("Stopped.")
             sys.exit(0)
