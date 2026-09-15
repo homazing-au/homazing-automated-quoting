@@ -699,46 +699,34 @@ def _start_resend_invoice_list(chat_id: str) -> str:
 
 
 def _do_resend_invoice(deal: dict) -> str:
-    """Re-send the email for an already-created invoice - no new Zoho or
-    QuickBooks invoice is created (that only happens via 'Send invoice')."""
-    from tools.zoho_create_invoice import get_invoice_by_subject
-    from tools.zoho_get_deal_contacts import get_deal_sms_contacts
-    from tools.zoho_send_invoice_email import send_invoice_email
+    """Re-send the email for an already-created invoice via the homazing-website
+    API — this calls the exact same PDF generator and email template as 'Send
+    invoice' (via its shared sendInvoiceEmail helper), so a resend is never a
+    separate/drifted copy. No new Zoho or QuickBooks invoice is created here,
+    and the Deal stage is left untouched."""
+    import requests
+    base_url = os.getenv("APPROVAL_BASE_URL", "https://homazing.com.au")
+    secret = os.getenv("CRON_SECRET", "")
     try:
-        invoice = get_invoice_by_subject(deal["address"])
-        if not invoice:
-            return f"No existing invoice found for {deal['address']} — use *Send invoice* instead."
-
-        total = deal.get("amount", 0)
-        gst = round(total / 11, 2)
-        pricing = {
-            "line_items": [], "referral": 0, "added": 0, "reduced": 0,
-            "total_inc_gst": total, "gst": gst,
-            "subtotal_ex_gst": round(total - gst, 2),
-        }
-
-        contacts = get_deal_sms_contacts(deal["id"])
-        agent = contacts.get("agent") or {}
-        customer = contacts.get("customer") or {}
-        assistant = contacts.get("assistant") or {}
-        to_emails = [e for e in (customer.get("email"), agent.get("email")) if e]
-        if not to_emails:
-            return f"No email on file for {deal['address']} — send manually."
-        contact_name = customer.get("name") or agent.get("name") or "Customer"
-        cc_emails = [e] if (e := assistant.get("email")) and e not in to_emails else []
-
-        send_invoice_email(
-            to_emails=to_emails,
-            contact_name=contact_name,
-            invoice_number=invoice["invoice_number"],
-            address=deal["address"],
-            total_inc_gst=total,
-            pricing=pricing,
-            cc_emails=cc_emails,
+        resp = requests.post(
+            f"{base_url}/api/resend-invoice",
+            headers={"Authorization": f"Bearer {secret}"},
+            json={"deal_id": deal["id"]},
+            timeout=30,
         )
+        resp.raise_for_status()
+        result = resp.json()
+        if "error" in result:
+            return f"Invoice resend failed: {result['error']}"
+
+        to_emails = result.get("to_emails", [])
+        cc_emails = result.get("cc_emails", [])
+        if not result.get("email_sent"):
+            return f"No email on file for {deal['address']} — send manually."
+
         cc_note = f" (cc: {', '.join(cc_emails)})" if cc_emails else ""
         return (
-            f"Invoice *{invoice['invoice_number']}* resent for {deal['address']}\n"
+            f"Invoice *{result.get('invoice_number', '?')}* resent for {deal['address']}\n"
             f"Emailed to {', '.join(to_emails)}{cc_note}"
         )
     except Exception as e:

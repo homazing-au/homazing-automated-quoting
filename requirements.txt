@@ -2,8 +2,6 @@ anthropic
 python-dotenv
 requests
 flask
-Pillow
-reportlab
 psutil
 google-api-python-client
 google-auth
