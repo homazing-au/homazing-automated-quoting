@@ -755,18 +755,20 @@ def _first_name(full_name: str) -> str:
     return full_name.split()[0] if full_name and full_name.split() else "there"
 
 
-def _notify_staging_event(deal_id: str, address: str, event: str) -> None:
+def _notify_staging_event(deal_id: str, address: str, event: str) -> list[str]:
     """event: 'staged' or 'removed'. Texts agent, customer (if a Contact
     exists - it won't if the agent approved the quote on the customer's
     behalf), and assistant (if the account has one on file) - the assistant
     gets a shorter, purely factual version. Best-effort: no deal_id, no
     contact, or no mobile number just means that recipient is silently
-    skipped."""
+    skipped. Returns a "First Name (role)" entry for each contact actually
+    texted, so the caller can confirm who received it."""
     if not deal_id:
-        return
+        return []
     from tools.zoho_get_deal_contacts import get_deal_sms_contacts
     from tools.twilio_sms import send_sms
     contacts = get_deal_sms_contacts(deal_id)
+    notified = []
     for role in ("agent", "customer", "assistant"):
         contact = contacts.get(role)
         if not (contact and contact.get("mobile")):
@@ -796,12 +798,15 @@ def _notify_staging_event(deal_id: str, address: str, event: str) -> None:
                     f"(We appreciate it if you've already left one!)"
                 )
         send_sms(contact["mobile"], body)
+        notified.append(f"{first} ({role})")
+    return notified
 
 
-def _notify_referral_paid(deal_id: str, address: str) -> None:
-    """Texts the agent only, once their referral is marked paid."""
+def _notify_referral_paid(deal_id: str, address: str) -> str | None:
+    """Texts the agent only, once their referral is marked paid. Returns
+    their first name if texted, so the caller can confirm who received it."""
     if not deal_id:
-        return
+        return None
     from tools.zoho_get_deal_contacts import get_deal_sms_contacts
     from tools.twilio_sms import send_sms
     agent = get_deal_sms_contacts(deal_id).get("agent")
@@ -812,6 +817,8 @@ def _notify_referral_paid(deal_id: str, address: str) -> None:
             f"Hi {first},\nYour referral payment for {address} has been sent. "
             f"Thanks so much for the business, we really appreciate it!",
         )
+        return first
+    return None
 
 
 def _start_staging_complete(chat_id: str) -> str:
@@ -1262,8 +1269,9 @@ def handle_message(chat_id: str, text: str, reply_to_id: int | None = None) -> s
         for i in indices:
             c = candidates[i]
             mark_staged(c["row"])
-            _notify_staging_event(c.get("deal_id", ""), c["address"], "staged")
-            done.append(c["address"])
+            notified = _notify_staging_event(c.get("deal_id", ""), c["address"], "staged")
+            sms_note = f" — texted {', '.join(notified)}" if notified else " — no SMS sent (no contacts on file)"
+            done.append(f"{c['address']}{sms_note}")
         # One resort at the end, not per-row - resorting mid-loop would shift
         # every remaining candidate's pre-fetched "row" index out from under it.
         resort_by_staged_date()
@@ -1284,8 +1292,9 @@ def handle_message(chat_id: str, text: str, reply_to_id: int | None = None) -> s
         for i in indices:
             c = candidates[i]
             mark_staging_removed(c["row"])
-            _notify_staging_event(c.get("deal_id", ""), c["address"], "removed")
-            done.append(c["address"])
+            notified = _notify_staging_event(c.get("deal_id", ""), c["address"], "removed")
+            sms_note = f" — texted {', '.join(notified)}" if notified else " — no SMS sent (no contacts on file)"
+            done.append(f"{c['address']}{sms_note}")
         _clear_session(chat_id)
         return "Marked staging removed today:\n" + "\n".join(f"• {a}" for a in done)
 
@@ -1358,8 +1367,9 @@ def handle_message(chat_id: str, text: str, reply_to_id: int | None = None) -> s
                 return "Paid for which one? Ask *how much for N* first, or say *referral paid for N*."
             c = candidates[last_idx]
             mark_referral_paid(c["row"], c.get("deal_id", ""))
-            _notify_referral_paid(c.get("deal_id", ""), c["address"])
-            return f"Marked referral paid for {c['address']}."
+            notified = _notify_referral_paid(c.get("deal_id", ""), c["address"])
+            sms_note = f" — texted {notified} (agent)" if notified else " — no SMS sent (no agent contact on file)"
+            return f"Marked referral paid for {c['address']}{sms_note}."
 
         if "how much" in lowered:
             c = _candidate_from_text(lowered)
@@ -1376,8 +1386,9 @@ def handle_message(chat_id: str, text: str, reply_to_id: int | None = None) -> s
             if not c:
                 return "Referral paid for which number? e.g. *referral paid for 2*"
             mark_referral_paid(c["row"], c.get("deal_id", ""))
-            _notify_referral_paid(c.get("deal_id", ""), c["address"])
-            return f"Marked referral paid for {c['address']}."
+            notified = _notify_referral_paid(c.get("deal_id", ""), c["address"])
+            sms_note = f" — texted {notified} (agent)" if notified else " — no SMS sent (no agent contact on file)"
+            return f"Marked referral paid for {c['address']}{sms_note}."
 
         return (
             "Say *how much for N*, *referral paid for N*, or *paid* (after asking how much).\n"
