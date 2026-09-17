@@ -50,8 +50,8 @@ MROUND rounds the total to nearest $10.
 STAGE_ORDER = [
     "GET_ADDRESS", "COLLECT_ROOMS", "CONFIRM_ROOMS", "ASK_REFERRAL", "CONFIRM_PRICE",
     "ASK_HIRE_PERIOD",
-    "GET_AGENT", "GET_AGENT_DETAILS",
-    "GET_CUSTOMER_DETAILS", "ASK_AGENCY_LINK", "GET_AGENCY_DETAILS_FOR_CUSTOMER",
+    "GET_AGENT", "GET_AGENT_PICK", "GET_AGENT_DETAILS",
+    "GET_CUSTOMER_DETAILS", "ASK_AGENCY_LINK", "ASK_AGENCY_LINK_PICK", "GET_AGENCY_DETAILS_FOR_CUSTOMER",
 ]
 
 # Data keys to clear when reverting to each stage (clears that stage + all later stages)
@@ -64,9 +64,11 @@ STAGE_CLEAR_KEYS = {
     "ASK_HIRE_PERIOD":   ["hire_period"],
     "GET_AGENT":         ["account_id", "agent_name", "agent_email",
                            "customer_name", "customer_email", "customer_mobile", "agency_query"],
+    "GET_AGENT_PICK":    ["agent_candidates"],
     "GET_AGENT_DETAILS": [],
     "GET_CUSTOMER_DETAILS":           ["customer_name", "customer_email", "customer_mobile"],
     "ASK_AGENCY_LINK":                ["account_id", "agent_name", "agent_email", "agency_query"],
+    "ASK_AGENCY_LINK_PICK":           ["agent_candidates"],
     "GET_AGENCY_DETAILS_FOR_CUSTOMER": [],
 }
 
@@ -80,6 +82,11 @@ HIRE_PERIOD_LABELS = {
     "standard": "Standard 8 weeks",
     "extended": "8 weeks + 4 weeks free / under offer",
 }
+
+
+def _format_agent_matches(matches: list[dict]) -> str:
+    lines = [f"{i + 1}. {m['Full_Name']}" for i, m in enumerate(matches)]
+    return "Found multiple matching agencies — which one?\n\n" + "\n".join(lines)
 
 
 def _session_file(chat_id: str) -> Path:
@@ -1163,7 +1170,7 @@ def handle_message(chat_id: str, text: str, reply_to_id: int | None = None) -> s
 
         from tools.zoho_lookup_contact import lookup_contact
         matches = lookup_contact(text)
-        if matches:
+        if len(matches) == 1:
             account = matches[0]
             data["account_id"] = account["id"]
             data["agent_name"] = account["Full_Name"]
@@ -1175,6 +1182,12 @@ def handle_message(chat_id: str, text: str, reply_to_id: int | None = None) -> s
                 f"Found *{account['Full_Name']}*.\n"
                 + _do_create_quote(chat_id, session)
             )
+        elif len(matches) > 1:
+            data["agent_candidates"] = matches
+            session["data"] = data
+            session["stage"] = "GET_AGENT_PICK"
+            _save_session(chat_id, session)
+            return _format_agent_matches(matches)
         else:
             data["agent_name"] = text
             session["stage"] = "GET_AGENT_DETAILS"
@@ -1184,6 +1197,28 @@ def handle_message(chat_id: str, text: str, reply_to_id: int | None = None) -> s
                 f"Please provide their name, mobile and email — e.g.\n"
                 f"_Jane Smith, 0412 345 678, jane@raywhite.com_"
             )
+
+    # ── GET_AGENT_PICK — disambiguate multiple agency name matches ──────────────
+    if stage == "GET_AGENT_PICK":
+        candidates = data.get("agent_candidates", [])
+        m = re.match(r'^\s*(\d+)\s*$', text)
+        if not m:
+            return "Please reply with just the number of the agent you meant."
+        idx = int(m.group(1)) - 1
+        if idx < 0 or idx >= len(candidates):
+            return f"Please reply with a number between 1 and {len(candidates)}."
+        account = candidates[idx]
+        data["account_id"] = account["id"]
+        data["agent_name"] = account["Full_Name"]
+        data["agent_email"] = account.get("Email", "")
+        data["account_site"] = account.get("Account_Site", "")
+        data.pop("agent_candidates", None)
+        session["data"] = data
+        _save_session(chat_id, session)
+        return (
+            f"Selected *{account['Full_Name']}*.\n"
+            + _do_create_quote(chat_id, session)
+        )
 
     # ── GET_AGENT_DETAILS — create new Account ─────────────────────────────────
     if stage == "GET_AGENT_DETAILS":
@@ -1226,7 +1261,7 @@ def handle_message(chat_id: str, text: str, reply_to_id: int | None = None) -> s
 
         from tools.zoho_lookup_contact import lookup_contact
         matches = lookup_contact(text)
-        if matches:
+        if len(matches) == 1:
             account = matches[0]
             data["account_id"] = account["id"]
             data["agent_name"] = account["Full_Name"]
@@ -1238,6 +1273,12 @@ def handle_message(chat_id: str, text: str, reply_to_id: int | None = None) -> s
                 f"Linked to *{account['Full_Name']}*.\n"
                 + _do_create_customer_quote(chat_id, session)
             )
+        elif len(matches) > 1:
+            data["agent_candidates"] = matches
+            session["data"] = data
+            session["stage"] = "ASK_AGENCY_LINK_PICK"
+            _save_session(chat_id, session)
+            return _format_agent_matches(matches)
         else:
             data["agency_query"] = text
             session["stage"] = "GET_AGENCY_DETAILS_FOR_CUSTOMER"
@@ -1247,6 +1288,28 @@ def handle_message(chat_id: str, text: str, reply_to_id: int | None = None) -> s
                 f"Please provide their name, mobile and email — e.g.\n"
                 f"_Jane Smith, 0412 345 678, jane@raywhite.com_"
             )
+
+    # ── ASK_AGENCY_LINK_PICK — disambiguate multiple agency name matches ────────
+    if stage == "ASK_AGENCY_LINK_PICK":
+        candidates = data.get("agent_candidates", [])
+        m = re.match(r'^\s*(\d+)\s*$', text)
+        if not m:
+            return "Please reply with just the number of the agent you meant."
+        idx = int(m.group(1)) - 1
+        if idx < 0 or idx >= len(candidates):
+            return f"Please reply with a number between 1 and {len(candidates)}."
+        account = candidates[idx]
+        data["account_id"] = account["id"]
+        data["agent_name"] = account["Full_Name"]
+        data["agent_email"] = account.get("Email", "")
+        data["account_site"] = account.get("Account_Site", "")
+        data.pop("agent_candidates", None)
+        session["data"] = data
+        _save_session(chat_id, session)
+        return (
+            f"Linked to *{account['Full_Name']}*.\n"
+            + _do_create_customer_quote(chat_id, session)
+        )
 
     # ── GET_AGENCY_DETAILS_FOR_CUSTOMER — new Account for a direct customer's agency
     if stage == "GET_AGENCY_DETAILS_FOR_CUSTOMER":
