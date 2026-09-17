@@ -75,12 +75,14 @@ STAGE_CLEAR_KEYS = {
 HIRE_PERIOD_PROMPT = (
     "What's the hire period for this one?\n"
     "*1* — Standard 8 weeks\n"
-    "*2* — 8 weeks standard + 4 weeks free, or under offer, whichever happens first"
+    "*2* — 8 weeks standard + 4 weeks free, or under offer, whichever happens first\n"
+    "*3* — 8 weeks standard + 2 weeks free, or under offer, whichever happens first"
 )
 
 HIRE_PERIOD_LABELS = {
-    "standard": "Standard 8 weeks",
-    "extended": "8 weeks + 4 weeks free / under offer",
+    "standard":  "Standard 8 weeks",
+    "extended":  "8 weeks + 4 weeks free / under offer",
+    "extended2": "8 weeks + 2 weeks free / under offer",
 }
 
 
@@ -1159,8 +1161,18 @@ def handle_message(chat_id: str, text: str, reply_to_id: int | None = None) -> s
         lowered = text.strip().lower()
         if lowered in ("1", "standard", "8", "8 weeks"):
             data["hire_period"] = "standard"
-        elif lowered in ("2", "extended", "4", "under offer") or ("free" in lowered) or ("under offer" in lowered):
+        elif lowered in ("2", "extended", "4 weeks", "4 weeks free"):
             data["hire_period"] = "extended"
+        elif lowered in ("3", "extended2", "2 weeks", "2 weeks free"):
+            data["hire_period"] = "extended2"
+        elif "4" in lowered and "week" in lowered:
+            data["hire_period"] = "extended"
+        elif "2" in lowered and "week" in lowered:
+            data["hire_period"] = "extended2"
+        elif "under offer" in lowered or "free" in lowered:
+            # Ambiguous between the two "+N weeks free / under offer" options
+            # with no week count given - ask again rather than guess.
+            return "Which one — *2* (8+4 weeks) or *3* (8+2 weeks)?"
         else:
             return HIRE_PERIOD_PROMPT
 
