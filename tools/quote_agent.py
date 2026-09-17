@@ -505,6 +505,7 @@ def _do_resend_quote(chat_id: str, session: dict, new_pricing: dict) -> str:
             "aid": data.get("account_id", ""),
             "did": data.get("deal_id", ""),
             "cid": data.get("contact_id", ""),
+            "hp":  data.get("hire_period", "standard"),
         }, separators=(",", ":"))
         token = base64.urlsafe_b64encode(token_data.encode()).decode().rstrip("=")
         base_url = os.getenv("APPROVAL_BASE_URL", "https://homazing.com.au")
@@ -522,6 +523,7 @@ def _do_resend_quote(chat_id: str, session: dict, new_pricing: dict) -> str:
             "address":       data.get("address", ""),
             "rooms":         data.get("rooms", {}),
             "pricing":       new_pricing,
+            "hire_period":   data.get("hire_period", "standard"),
         })
 
         print(f"\nApproval URL: {approval_url}\n")
@@ -664,6 +666,23 @@ def _start_resend_quote_list(chat_id: str) -> str:
         if match:
             quote_number, record = match
             total = record["pricing"]["total_inc_gst"]
+            # The cached local record's agent_name/agent_email/account_id were
+            # snapshotted when the quote was first created - if the Deal's
+            # Account link was corrected since (e.g. a duplicate/misspelled
+            # agency account was fixed), that cache would silently resend to
+            # a stale or missing email. Always re-fetch who the Deal is
+            # *currently* linked to in Zoho instead of trusting the cache.
+            contacts = get_deal_sms_contacts(d["id"])
+            agent = contacts.get("agent") or {}
+            customer = contacts.get("customer") or {}
+            record = {
+                **record,
+                "account_id":     contacts.get("account_id") or record.get("account_id", ""),
+                "agent_name":     agent.get("name") or record.get("agent_name", ""),
+                "agent_email":    agent.get("email") or record.get("agent_email", ""),
+                "customer_name":  customer.get("name") or record.get("customer_name", ""),
+                "customer_email": customer.get("email") or record.get("customer_email", ""),
+            }
         else:
             quote = get_quote_by_subject(d["address"])
             if not quote:

@@ -32,8 +32,11 @@ def _get(module: str, record_id: str, fields: list[str]) -> dict | None:
 
 def get_deal_sms_contacts(deal_id: str) -> dict:
     """Returns {"agent": {...} | None, "customer": {...} | None,
-    "assistant": {...} | None}, each a {"name", "mobile", "email"} dict."""
-    result = {"agent": None, "customer": None, "assistant": None}
+    "assistant": {...} | None, "account_id": str | None}, each contact a
+    {"name", "mobile", "email"} dict. Always re-fetches the Deal's *current*
+    Account/Contact links live - never trust a caller's cached account_id,
+    it may be stale if the Deal was relinked after the quote was created."""
+    result = {"agent": None, "customer": None, "assistant": None, "account_id": None}
 
     deal = _get("Deals", deal_id, ["Account_Name", "Contact_Name"])
     if not deal:
@@ -41,6 +44,7 @@ def get_deal_sms_contacts(deal_id: str) -> dict:
 
     account_ref = deal.get("Account_Name")
     if account_ref:
+        result["account_id"] = account_ref["id"]
         account = _get("Accounts", account_ref["id"], [
             "Account_Name", "Phone", "Email",
             "Assistant_Name", "Assistant_Mobile", "Assistant_Email",
