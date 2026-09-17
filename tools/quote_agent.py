@@ -3,7 +3,7 @@ Homazing quote agent. Manages multi-turn Telegram conversation to collect
 room details, calculate pricing, and create a Zoho CRM quote.
 
 State machine: COLLECT_ROOMS → ASK_REFERRAL → CONFIRM_PRICE → ADJUST_PRICE
-               → GET_AGENT → GET_AGENT_DETAILS → DONE
+               → ASK_HIRE_PERIOD → GET_AGENT → GET_AGENT_DETAILS → DONE
 """
 
 import json
@@ -49,6 +49,7 @@ MROUND rounds the total to nearest $10.
 
 STAGE_ORDER = [
     "GET_ADDRESS", "COLLECT_ROOMS", "CONFIRM_ROOMS", "ASK_REFERRAL", "CONFIRM_PRICE",
+    "ASK_HIRE_PERIOD",
     "GET_AGENT", "GET_AGENT_DETAILS",
     "GET_CUSTOMER_DETAILS", "ASK_AGENCY_LINK", "GET_AGENCY_DETAILS_FOR_CUSTOMER",
 ]
@@ -60,12 +61,24 @@ STAGE_CLEAR_KEYS = {
     "CONFIRM_ROOMS":     [],
     "ASK_REFERRAL":      ["referral_pct", "pricing"],
     "CONFIRM_PRICE":     ["reduced_pct", "added_pct"],
+    "ASK_HIRE_PERIOD":   ["hire_period"],
     "GET_AGENT":         ["account_id", "agent_name", "agent_email",
                            "customer_name", "customer_email", "customer_mobile", "agency_query"],
     "GET_AGENT_DETAILS": [],
     "GET_CUSTOMER_DETAILS":           ["customer_name", "customer_email", "customer_mobile"],
     "ASK_AGENCY_LINK":                ["account_id", "agent_name", "agent_email", "agency_query"],
     "GET_AGENCY_DETAILS_FOR_CUSTOMER": [],
+}
+
+HIRE_PERIOD_PROMPT = (
+    "What's the hire period for this one?\n"
+    "*1* — Standard 8 weeks\n"
+    "*2* — 8 weeks standard + 4 weeks free, or under offer, whichever happens first"
+)
+
+HIRE_PERIOD_LABELS = {
+    "standard": "Standard 8 weeks",
+    "extended": "8 weeks + 4 weeks free / under offer",
 }
 
 
@@ -276,6 +289,7 @@ def _do_create_quote(chat_id: str, session: dict) -> str:
             "aid": data.get("account_id", ""),
             "did": quote.get("deal_id", ""),
             "cid": "",
+            "hp":  data.get("hire_period", "standard"),
         }, separators=(",", ":"))
         token = base64.urlsafe_b64encode(token_data.encode()).decode().rstrip("=")
 
@@ -291,6 +305,7 @@ def _do_create_quote(chat_id: str, session: dict) -> str:
             "address":       data.get("address", ""),
             "rooms":         data.get("rooms", {}),
             "pricing":       data["pricing"],
+            "hire_period":   data.get("hire_period", "standard"),
         })
 
         _clear_session(chat_id)
@@ -335,10 +350,12 @@ def _do_create_quote(chat_id: str, session: dict) -> str:
         else:
             email_status = "No email on file"
 
+        hire_label = HIRE_PERIOD_LABELS.get(data.get("hire_period", "standard"), "Standard 8 weeks")
         return (
             f"Quote created in Zoho\n"
             f"Quote: {quote['quote_number']}\n"
             f"Agent: {data['agent_name']}\n"
+            f"Hire period: {hire_label}\n"
             f"Total: ${data['pricing']['total_inc_gst']:,.0f} inc GST\n\n"
             f"{email_status}"
         )
@@ -376,6 +393,7 @@ def _do_create_customer_quote(chat_id: str, session: dict) -> str:
             "aid": account_id,
             "did": quote.get("deal_id", ""),
             "cid": contact["id"],
+            "hp":  data.get("hire_period", "standard"),
         }, separators=(",", ":"))
         token = base64.urlsafe_b64encode(token_data.encode()).decode().rstrip("=")
 
@@ -391,6 +409,7 @@ def _do_create_customer_quote(chat_id: str, session: dict) -> str:
             "address":       data.get("address", ""),
             "rooms":         data.get("rooms", {}),
             "pricing":       data["pricing"],
+            "hire_period":   data.get("hire_period", "standard"),
         })
 
         _clear_session(chat_id)
@@ -435,11 +454,13 @@ def _do_create_customer_quote(chat_id: str, session: dict) -> str:
             email_status = "No email on file"
 
         agency_line = f"Agency: {data['agent_name']}\n" if data.get("agent_name") else "Agency: Direct (none)\n"
+        hire_label = HIRE_PERIOD_LABELS.get(data.get("hire_period", "standard"), "Standard 8 weeks")
         return (
             f"Quote created in Zoho\n"
             f"Quote: {quote['quote_number']}\n"
             f"Customer: {data['customer_name']}\n"
             f"{agency_line}"
+            f"Hire period: {hire_label}\n"
             f"Total: ${data['pricing']['total_inc_gst']:,.0f} inc GST\n\n"
             f"{email_status}"
         )
@@ -1088,14 +1109,28 @@ def handle_message(chat_id: str, text: str, reply_to_id: int | None = None) -> s
 
         confirmed = _extract_yes_no(text)
         if confirmed is True:
-            session["stage"] = "GET_AGENT"
+            session["stage"] = "ASK_HIRE_PERIOD"
             _save_session(chat_id, session)
-            return "What's the RE agency name? _(or reply \"customer\" if this is a direct customer)_"
+            return HIRE_PERIOD_PROMPT
         if confirmed is False:
             _clear_session(chat_id)
             return "Quote cancelled. Send /new to start again."
 
         return "Confirm the price? Or adjust with *reduce by X%*, *add X%*, or type a flat amount like *2400*."
+
+    # ── ASK_HIRE_PERIOD ──────────────────────────────────────────────────────────
+    if stage == "ASK_HIRE_PERIOD":
+        lowered = text.strip().lower()
+        if lowered in ("1", "standard", "8", "8 weeks"):
+            data["hire_period"] = "standard"
+        elif lowered in ("2", "extended", "4", "under offer") or ("free" in lowered) or ("under offer" in lowered):
+            data["hire_period"] = "extended"
+        else:
+            return HIRE_PERIOD_PROMPT
+
+        session["stage"] = "GET_AGENT"
+        _save_session(chat_id, session)
+        return "What's the RE agency name? _(or reply \"customer\" if this is a direct customer)_"
 
     # ── GET_AGENT ──────────────────────────────────────────────────────────────
     if stage == "GET_AGENT":
