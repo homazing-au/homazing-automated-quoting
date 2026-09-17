@@ -339,23 +339,28 @@ def _do_create_quote(chat_id: str, session: dict) -> str:
                     cc_emails=[assistant_email] if assistant_email else None,
                 )
                 email_status = f"Approval link emailed to {agent_email}"
-                try:
-                    from tools.google_sheets import append_staging_job
-                    append_staging_job(
-                        address=data.get("address", ""),
-                        agency=data.get("account_site") or data.get("agent_name", ""),
-                        agent_name=data.get("agent_name", ""),
-                        gross=data["pricing"]["total_inc_gst"],
-                        has_referral=bool(data.get("referral_pct")),
-                    )
-                except Exception as sheet_err:
-                    print(f"Staging Jobs sheet append failed: {sheet_err}")
-                    email_status += f"\n⚠️ Staging Jobs sheet update failed: {sheet_err}"
             except Exception as email_err:
                 print(f"Email send failed: {email_err}")
                 email_status = f"Email failed: {email_err}"
         else:
             email_status = "No email on file"
+
+        # The job must be tracked in the Staging Jobs sheet regardless of
+        # whether the approval email went out - these are independent
+        # concerns. A missing agent email should never mean a job silently
+        # never appears on the sheet (this is exactly what happened once).
+        try:
+            from tools.google_sheets import append_staging_job
+            append_staging_job(
+                address=data.get("address", ""),
+                agency=data.get("account_site") or data.get("agent_name", ""),
+                agent_name=data.get("agent_name", ""),
+                gross=data["pricing"]["total_inc_gst"],
+                has_referral=bool(data.get("referral_pct")),
+            )
+        except Exception as sheet_err:
+            print(f"Staging Jobs sheet append failed: {sheet_err}")
+            email_status += f"\n⚠️ Staging Jobs sheet update failed: {sheet_err}"
 
         hire_label = HIRE_PERIOD_LABELS.get(data.get("hire_period", "standard"), "Standard 8 weeks")
         return (
@@ -442,23 +447,28 @@ def _do_create_customer_quote(chat_id: str, session: dict) -> str:
                     cc_emails=[assistant_email] if assistant_email else None,
                 )
                 email_status = f"Approval link emailed to {', '.join(to_emails)}"
-                try:
-                    from tools.google_sheets import append_staging_job
-                    append_staging_job(
-                        address=data.get("address", ""),
-                        agency=data.get("account_site") or data.get("agent_name", ""),
-                        agent_name=data["customer_name"],
-                        gross=data["pricing"]["total_inc_gst"],
-                        has_referral=bool(data.get("referral_pct")),
-                    )
-                except Exception as sheet_err:
-                    print(f"Staging Jobs sheet append failed: {sheet_err}")
-                    email_status += f"\n⚠️ Staging Jobs sheet update failed: {sheet_err}"
             except Exception as email_err:
                 print(f"Email send failed: {email_err}")
                 email_status = f"Email failed: {email_err}"
         else:
             email_status = "No email on file"
+
+        # The job must be tracked in the Staging Jobs sheet regardless of
+        # whether the approval email went out - these are independent
+        # concerns. A missing agent/customer email should never mean a job
+        # silently never appears on the sheet (this is exactly what happened once).
+        try:
+            from tools.google_sheets import append_staging_job
+            append_staging_job(
+                address=data.get("address", ""),
+                agency=data.get("account_site") or data.get("agent_name", ""),
+                agent_name=data["customer_name"],
+                gross=data["pricing"]["total_inc_gst"],
+                has_referral=bool(data.get("referral_pct")),
+            )
+        except Exception as sheet_err:
+            print(f"Staging Jobs sheet append failed: {sheet_err}")
+            email_status += f"\n⚠️ Staging Jobs sheet update failed: {sheet_err}"
 
         agency_line = f"Agency: {data['agent_name']}\n" if data.get("agent_name") else "Agency: Direct (none)\n"
         hire_label = HIRE_PERIOD_LABELS.get(data.get("hire_period", "standard"), "Standard 8 weeks")
