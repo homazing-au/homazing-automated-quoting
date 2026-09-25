@@ -1403,7 +1403,7 @@ def handle_message(chat_id: str, text: str, reply_to_id: int | None = None) -> s
 
     # ── STAGING_COMPLETE_PICK — mark today as the Staged Date ───────────────────
     if stage == "STAGING_COMPLETE_PICK":
-        from tools.sheet_actions import mark_staged, resort_by_staged_date
+        from tools.sheet_actions import mark_staged, resort_by_staged_date, zoho_deal_id_for_address
         candidates = data.get("candidates", [])
         nums = _extract_numbers(text)
         if not nums:
@@ -1417,7 +1417,8 @@ def handle_message(chat_id: str, text: str, reply_to_id: int | None = None) -> s
             c = candidates[i]
             try:
                 mark_staged(c["row"])
-                notified, failed = _notify_staging_event(c.get("deal_id", ""), c["address"], "staged")
+                deal_id = zoho_deal_id_for_address(c["address"])
+                notified, failed = _notify_staging_event(deal_id, c["address"], "staged")
                 sms_note = f" — texted {', '.join(notified)}" if notified else " — no SMS sent (no contacts on file)"
                 if failed:
                     sms_note += f" — ⚠️ SMS FAILED for {', '.join(failed)}"
@@ -1437,7 +1438,7 @@ def handle_message(chat_id: str, text: str, reply_to_id: int | None = None) -> s
 
     # ── STAGING_REMOVED_PICK — mark today as the Staging Removed Date ───────────
     if stage == "STAGING_REMOVED_PICK":
-        from tools.sheet_actions import mark_staging_removed
+        from tools.sheet_actions import mark_staging_removed, zoho_deal_id_for_address
         candidates = data.get("candidates", [])
         nums = _extract_numbers(text)
         if not nums:
@@ -1451,7 +1452,8 @@ def handle_message(chat_id: str, text: str, reply_to_id: int | None = None) -> s
             c = candidates[i]
             try:
                 mark_staging_removed(c["row"])
-                notified, failed = _notify_staging_event(c.get("deal_id", ""), c["address"], "removed")
+                deal_id = zoho_deal_id_for_address(c["address"])
+                notified, failed = _notify_staging_event(deal_id, c["address"], "removed")
                 sms_note = f" — texted {', '.join(notified)}" if notified else " — no SMS sent (no contacts on file)"
                 if failed:
                     sms_note += f" — ⚠️ SMS FAILED for {', '.join(failed)}"
@@ -1466,7 +1468,7 @@ def handle_message(chat_id: str, text: str, reply_to_id: int | None = None) -> s
 
     # ── INVOICE_PAID_PICK — mark Invoice Paid (T) = Y, move Zoho deal to Closed Won ─
     if stage == "INVOICE_PAID_PICK":
-        from tools.sheet_actions import mark_invoice_paid
+        from tools.sheet_actions import mark_invoice_paid, zoho_deal_id_for_address
         candidates = data.get("candidates", [])
         nums = _extract_numbers(text)
         if not nums:
@@ -1479,7 +1481,7 @@ def handle_message(chat_id: str, text: str, reply_to_id: int | None = None) -> s
         for i in indices:
             c = candidates[i]
             try:
-                mark_invoice_paid(c["row"], c.get("deal_id", ""))
+                mark_invoice_paid(c["row"], zoho_deal_id_for_address(c["address"]))
                 done.append(c["address"])
             except Exception as row_err:
                 errored.append(f"{c['address']} — ⚠️ FAILED: {row_err}")
@@ -1521,7 +1523,7 @@ def handle_message(chat_id: str, text: str, reply_to_id: int | None = None) -> s
 
     # ── REFERRAL_ACTIVE — "how much for N" / "referral paid for N" / bare "paid" ─
     if stage == "REFERRAL_ACTIVE":
-        from tools.sheet_actions import mark_referral_paid, get_referral_amount_display
+        from tools.sheet_actions import mark_referral_paid, get_referral_amount_display, zoho_deal_id_for_address
         candidates = data.get("candidates", [])
         lowered = text.lower().strip()
 
@@ -1539,8 +1541,9 @@ def handle_message(chat_id: str, text: str, reply_to_id: int | None = None) -> s
             if last_idx is None:
                 return "Paid for which one? Ask *how much for N* first, or say *referral paid for N*."
             c = candidates[last_idx]
-            mark_referral_paid(c["row"], c.get("deal_id", ""))
-            notified, failed = _notify_referral_paid(c.get("deal_id", ""), c["address"])
+            deal_id = zoho_deal_id_for_address(c["address"])
+            mark_referral_paid(c["row"], deal_id)
+            notified, failed = _notify_referral_paid(deal_id, c["address"])
             if failed:
                 sms_note = f" — ⚠️ SMS FAILED for {failed} (agent)"
             elif notified:
@@ -1563,8 +1566,9 @@ def handle_message(chat_id: str, text: str, reply_to_id: int | None = None) -> s
             c = _candidate_from_text(lowered)
             if not c:
                 return "Referral paid for which number? e.g. *referral paid for 2*"
-            mark_referral_paid(c["row"], c.get("deal_id", ""))
-            notified, failed = _notify_referral_paid(c.get("deal_id", ""), c["address"])
+            deal_id = zoho_deal_id_for_address(c["address"])
+            mark_referral_paid(c["row"], deal_id)
+            notified, failed = _notify_referral_paid(deal_id, c["address"])
             if failed:
                 sms_note = f" — ⚠️ SMS FAILED for {failed} (agent)"
             elif notified:

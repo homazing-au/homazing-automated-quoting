@@ -14,10 +14,10 @@ CRM_BASE = "https://www.zohoapis.com.au/crm/v2"
 OPEN_STAGES = ["Quote Awaiting Approval", "Quote Approved", "Invoiced"]
 
 
-def list_staging_candidates() -> list[dict]:
+def list_staging_candidates(stages: list[str] = OPEN_STAGES) -> list[dict]:
     token = get_access_token()
     headers = {"Authorization": f"Zoho-oauthtoken {token}"}
-    criteria = "or".join(f"(Stage:equals:{stage})" for stage in OPEN_STAGES)
+    criteria = "or".join(f"(Stage:equals:{stage})" for stage in stages)
     resp = requests.get(
         f"{CRM_BASE}/Deals/search",
         headers=headers,

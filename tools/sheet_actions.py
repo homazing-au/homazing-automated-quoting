@@ -54,44 +54,60 @@ def _cell(row, idx):
     return row[idx] if idx < len(row) else None
 
 
-def _zoho_deal_id_by_addr() -> dict:
-    """address (normalized) -> deal id, across every open/invoiced Zoho
-    stage. Best-effort lookup used to attach a deal_id to a sheet-sourced
-    candidate (for the Closed Won update, or an SMS contact lookup) -
-    never used to filter which candidates show up."""
-    from tools.zoho_list_invoiced_deals import list_invoiced_deals
-    from tools.zoho_list_staging_candidates import list_staging_candidates
+def zoho_deal_id_for_address(address: str) -> str:
+    """Best-effort: find the single Zoho deal for one specific address, without
+    pulling every open/invoiced deal into memory. Replaces the old
+    _zoho_deal_id_by_addr(), which listed the entire Zoho deal pipeline on
+    every single bot menu (staging complete/removed, referral, invoice paid) -
+    even for the candidates never picked - and got more expensive every week
+    as the pipeline grew. That eager full-list pull was traced to the
+    background worker's repeated OOM crashes (2026-09-20, 2026-09-25): each
+    call left the process's memory permanently higher (CPython/glibc doesn't
+    reliably return large one-off allocations to the OS), so RSS climbed in
+    steps until it hit Render's 512Mi limit. Call this only for the address(es)
+    a command actually needs a deal_id for (after the user has picked from a
+    sheet-only candidate list), never to build the candidate list itself.
 
-    by_addr = {}
-    for d in list_invoiced_deals() + list_staging_candidates():
-        if d.get("address"):
-            by_addr.setdefault(_normalize_address(d["address"]), d["id"])
-    return by_addr
+    Zoho's Deal_Name is the full address ('11 Rhubarb Rd, Manor Lakes, VIC
+    3024'); the sheet stores street-only ('11 Rhubarb Rd') - so this searches
+    with starts_with (a handful of matches at most) and confirms with the same
+    _normalize_address() comparison the old full-list version used, rather
+    than relying on Zoho's server-side equality on a partial string."""
+    import requests
+    from tools.zoho_auth import get_access_token
+
+    if not address:
+        return ""
+    token = get_access_token()
+    headers = {"Authorization": f"Zoho-oauthtoken {token}"}
+    resp = requests.get(
+        "https://www.zohoapis.com.au/crm/v2/Deals/search",
+        headers=headers,
+        params={"criteria": f"(Deal_Name:starts_with:{address})"},
+    )
+    if resp.status_code in (204, 404):
+        return ""
+    resp.raise_for_status()
+    deals = resp.json().get("data", [])
+    norm = _normalize_address(address)
+    for d in deals:
+        if _normalize_address(d.get("Deal_Name", "")) == norm:
+            return d.get("id", "")
+    return ""
 
 
 def list_staging_complete_candidates() -> list[dict]:
-    """Jobs that could still need staging: any Zoho deal not yet Closed Won/
-    Closed Lost (awaiting approval, approved, or invoiced - staging can
-    happen at any of those points), matched to its sheet row, excluding
-    rows that already have a Staged Date (F)."""
-    from tools.zoho_list_staging_candidates import list_staging_candidates
-
-    zoho_deals = list_staging_candidates()
-    sheet_rows = list(enumerate(_get_rows(), start=4))
-
+    """Jobs that could still need staging: every sheet row with an address but
+    no Staged Date (F) yet. Sheet-only - the moment a quote is created it gets
+    its own row here, so "not yet staged" is entirely a sheet property and
+    never needs a Zoho pull to determine (see zoho_deal_id_for_address, which
+    resolves a deal_id lazily only for address(es) actually picked)."""
     candidates = []
-    for deal in zoho_deals:
-        deal_addr = deal["address"]
-        if not deal_addr:
-            continue
-        norm = _normalize_address(deal_addr)
-        for i, row in sheet_rows:
-            addr = _cell(row, 1)
-            if addr and _normalize_address(addr) == norm:
-                staged_date = _cell(row, 5)
-                if not staged_date:
-                    candidates.append({"row": i, "address": addr, "deal_id": deal["id"]})
-                break
+    for i, row in enumerate(_get_rows(), start=4):
+        addr = _cell(row, 1)
+        staged_date = _cell(row, 5)
+        if addr and not staged_date:
+            candidates.append({"row": i, "address": addr})
     return candidates
 
 
@@ -162,18 +178,15 @@ def list_staging_removed_candidates() -> list[dict]:
     silently hid older jobs whose deal had already moved past Invoiced (e.g.
     Closed Won) even though the staging itself hadn't been picked up yet.
     The sheet, not Zoho's stage, is the source of truth for what's
-    physically staged."""
-    zoho_by_addr = _zoho_deal_id_by_addr()
+    physically staged. No Zoho pull here - deal_id is resolved lazily (see
+    zoho_deal_id_for_address) only for the address(es) actually picked."""
     candidates = []
     for i, row in enumerate(_get_rows(), start=4):
         addr = _cell(row, 1)
         staged_date = _cell(row, 5)
         removed_date = _cell(row, 9)
         if addr and staged_date and not removed_date:
-            candidates.append({
-                "row": i, "address": addr,
-                "deal_id": zoho_by_addr.get(_normalize_address(addr), ""),
-            })
+            candidates.append({"row": i, "address": addr})
     return candidates
 
 
@@ -190,12 +203,10 @@ def list_referral_candidates() -> list[dict]:
     """Jobs where a referral is owed (X=Y) and not yet paid (Z blank).
     Sheet-only, same reasoning as list_staging_removed_candidates - gating
     on Zoho's Invoiced stage hid older jobs whose deal had already moved
-    past Invoiced. Looks up each row's matching Zoho deal (if any, from
-    either the Invoiced or still-open stages) purely so mark_referral_paid
-    can also flip that deal to Closed Won - a best-effort side effect, not
-    a requirement for the job to show up here."""
-    zoho_by_addr = _zoho_deal_id_by_addr()
-
+    past Invoiced. deal_id (needed so mark_referral_paid can also flip that
+    deal to Closed Won) is resolved lazily - see zoho_deal_id_for_address -
+    only for the address(es) actually picked, not eagerly for this whole
+    list."""
     unformatted = _get_rows(render="UNFORMATTED_VALUE")
     formatted = _get_rows(render="FORMATTED_VALUE")
     candidates = []
@@ -205,11 +216,9 @@ def list_referral_candidates() -> list[dict]:
         referral_paid = _cell(row, 25)
         if addr and referral_yn == "Y" and not referral_paid:
             amount_display = (_cell(frow, 24) or "$0").strip()
-            deal_id = zoho_by_addr.get(_normalize_address(addr), "")
             candidates.append({
                 "row": i, "address": addr,
                 "amount_display": amount_display,
-                "deal_id": deal_id,
             })
     return candidates
 
@@ -233,18 +242,15 @@ def list_invoice_paid_candidates() -> list[dict]:
     (retired for being an unreliable dependency - a slow/unreachable QBO API
     call would fail the whole weekly sync) with a manual confirmation the
     same way referral-paid works: you already know when you've been paid,
-    so just tell the bot."""
-    zoho_by_addr = _zoho_deal_id_by_addr()
+    so just tell the bot. deal_id is resolved lazily (see
+    zoho_deal_id_for_address) only for the address(es) actually picked."""
     candidates = []
     for i, row in enumerate(_get_rows(), start=4):
         addr = _cell(row, 1)
         gross = _cell(row, 20)
         invoice_paid = _cell(row, 19)
         if addr and gross and invoice_paid != "Y":
-            candidates.append({
-                "row": i, "address": addr,
-                "deal_id": zoho_by_addr.get(_normalize_address(addr), ""),
-            })
+            candidates.append({"row": i, "address": addr})
     return candidates
 
 
@@ -261,27 +267,19 @@ def mark_invoice_paid(row: int, deal_id: str = "") -> None:
 
 
 def list_quote_declined_candidates() -> list[dict]:
-    """Jobs whose Zoho deal is still in 'Quote Awaiting Approval' - the
-    customer/agent can decline before it's ever approved, matched to a
-    sheet row if one already exists (a quote can be in the sheet before
-    approval, same as the staging-complete list)."""
-    from tools.zoho_list_staging_candidates import list_staging_candidates
-
-    zoho_deals = [d for d in list_staging_candidates() if d.get("stage") == "Quote Awaiting Approval"]
-    sheet_rows = list(enumerate(_get_rows(), start=4))
-
-    candidates = []
-    for deal in zoho_deals:
-        deal_addr = deal["address"]
-        if not deal_addr:
-            continue
-        norm = _normalize_address(deal_addr)
-        for i, row in sheet_rows:
-            addr = _cell(row, 1)
-            if addr and _normalize_address(addr) == norm:
-                candidates.append({"row": i, "address": addr, "deal_id": deal["id"]})
-                break
-    return candidates
+    """Jobs from the Google Sheet with no Staged Date (F) yet - same sheet-only
+    filter as list_staging_complete_candidates(). This is deliberately broader
+    than "still awaiting approval": a blank Staged Date also covers jobs already
+    approved (or even invoiced) but not yet staged, since the sheet has no
+    separate approval-status column. Traded off for simplicity - manually
+    declining a job here is a fallback for a verbal/phone decline anyway (the
+    normal path is automatic: the customer/agent's own decline on the approval
+    web form already moves the Zoho deal to Closed Lost and pings the bot on
+    its own, see homazing-website's /api/decline route), and the caller already
+    knows which address they mean to decline before picking a number. deal_id
+    is resolved lazily (see zoho_deal_id_for_address) only for the address(es)
+    actually picked."""
+    return list_staging_complete_candidates()
 
 
 def _remove_rows_and_renumber(rows: list[int]) -> None:
@@ -320,13 +318,16 @@ def mark_quotes_declined(candidates: list[dict]) -> None:
     doesn't show a declined quote as still 'Delivered'), then removes all
     the given sheet rows and renumbers column A in one batch - must be done
     together, since deleting rows one at a time would invalidate the row
-    numbers of the ones still queued."""
+    numbers of the ones still queued. deal_id is resolved lazily here (see
+    zoho_deal_id_for_address), one Zoho lookup per address actually being
+    declined, not eagerly for the whole candidate list."""
     from tools.zoho_update_quote import mark_deal_closed_lost
     from tools.zoho_create_quote import get_quote_by_subject
     for c in candidates:
-        if c.get("deal_id"):
+        deal_id = zoho_deal_id_for_address(c.get("address", ""))
+        if deal_id:
             quote = get_quote_by_subject(c["address"]) if c.get("address") else None
-            mark_deal_closed_lost(c["deal_id"], quote_id=quote["id"] if quote else "")
+            mark_deal_closed_lost(deal_id, quote_id=quote["id"] if quote else "")
     _remove_rows_and_renumber([c["row"] for c in candidates])
 
 
